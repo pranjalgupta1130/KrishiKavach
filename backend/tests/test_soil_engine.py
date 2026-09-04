@@ -130,3 +130,47 @@ def test_validate_soil_moisture_above_maximum():
     """Test 17: Soil moisture above maximum (1.0) raises ValueError."""
     with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
         validate_soil_moisture(1.05)
+
+
+def test_soil_moisture_exactly_at_wilting_point():
+    """Test 18: Soil moisture exactly at wilting point (0.15 -> Moderate status)."""
+    result = calculate_soil_moisture_status(soil_moisture=0.15)
+    assert result["soil_moisture"] == 0.15
+    assert result["status"] == "Moderate"
+    assert result["wilting_point"] == 0.15
+
+
+def test_soil_moisture_exactly_at_field_capacity():
+    """Test 19: Soil moisture exactly at field capacity (0.35 -> Optimal status)."""
+    result = calculate_soil_moisture_status(soil_moisture=0.35)
+    assert result["soil_moisture"] == 0.35
+    assert result["status"] == "Optimal"
+    assert result["field_capacity"] == 0.35
+
+
+def test_soil_moisture_below_minimum_threshold():
+    """Test 20: Soil moisture below minimum threshold (< 0.0) raises ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        calculate_soil_moisture_status(-0.01)
+
+
+def test_soil_moisture_above_maximum_threshold():
+    """Test 21: Soil moisture above maximum threshold (> 1.0) raises ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        calculate_soil_moisture_status(1.01)
+
+
+def test_soil_moisture_invalid_negative_values():
+    """Test 22: Negative values raise ValueError across status calculation and validation."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        calculate_soil_moisture_status(-0.5)
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        validate_soil_moisture(-1.0)
+
+
+def test_soil_moisture_invalid_values_greater_than_one():
+    """Test 23: Values > 1.0 raise ValueError across status calculation and validation."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        calculate_soil_moisture_status(1.5)
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        validate_soil_moisture(2.5)

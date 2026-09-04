@@ -135,3 +135,48 @@ def test_validate_temperature_above_maximum():
     """Test 14: Temperature above maximum (60°C) raises ValueError."""
     with pytest.raises(ValueError, match=r"outside the valid range of \[-20°C, 60°C\]"):
         validate_temperature(65)
+
+
+def test_pest_stage_exactly_on_boundary():
+    """Test 15: GDD exactly on stage thresholds (100 -> Egg, 300 -> Larva, 500 -> Pupa)."""
+    assert determine_pest_stage(100.0)["stage"] == "Egg"
+    assert determine_pest_stage(300.0)["stage"] == "Larva"
+    assert determine_pest_stage(500.0)["stage"] == "Pupa"
+
+
+def test_pest_stage_just_below_boundary():
+    """Test 16: GDD just below stage thresholds (99.9 -> Egg, 299.9 -> Larva, 499.9 -> Pupa)."""
+    assert determine_pest_stage(99.9)["stage"] == "Egg"
+    assert determine_pest_stage(299.9)["stage"] == "Larva"
+    assert determine_pest_stage(499.9)["stage"] == "Pupa"
+
+
+def test_pest_stage_just_above_boundary():
+    """Test 17: GDD just above stage thresholds (100.1 -> Larva, 300.1 -> Pupa, 500.1 -> Adult)."""
+    assert determine_pest_stage(100.1)["stage"] == "Larva"
+    assert determine_pest_stage(300.1)["stage"] == "Pupa"
+    assert determine_pest_stage(500.1)["stage"] == "Adult"
+
+
+def test_temperature_below_base_threshold():
+    """Test 18: Mean temperature below Pink Bollworm base threshold (12°C) results in 0.0 daily GDD."""
+    result = calculate_pink_bollworm_risk(tmax=10, tmin=8, previous_gdd=50.0)
+    assert result["daily_gdd"] == 0.0
+    assert result["cumulative_gdd"] == 50.0
+    assert result["pest_risk_high"] is False
+
+
+def test_temperature_equal_to_base_threshold():
+    """Test 19: Mean temperature exactly equal to base threshold (12°C) results in 0.0 daily GDD."""
+    result = calculate_pink_bollworm_risk(tmax=12, tmin=12, previous_gdd=50.0)
+    assert result["daily_gdd"] == 0.0
+    assert result["cumulative_gdd"] == 50.0
+    assert result["pest_risk_high"] is False
+
+
+def test_invalid_negative_temperatures():
+    """Test 20: Negative temperatures below -20°C raise ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[-20°C, 60°C\]"):
+        calculate_pink_bollworm_risk(tmax=-21, tmin=-25)
+    with pytest.raises(ValueError, match=r"outside the valid range of \[-20°C, 60°C\]"):
+        validate_temperature(-21.0)
