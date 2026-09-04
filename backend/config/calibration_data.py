@@ -33,3 +33,23 @@ FIELD_CAPACITY = 0.35
 
 # Volumetric water content ratio at permanent wilting point (minimum soil moisture for plant extraction)
 WILTING_POINT = 0.15
+
+# Crop stage water requirements and recommended soil moisture parameters
+CROP_STAGE_PARAMETERS = {
+    "germination": {
+        "water_requirement": "Low",
+        "recommended_soil_moisture": 0.20,
+    },
+    "vegetative": {
+        "water_requirement": "Medium",
+        "recommended_soil_moisture": 0.35,
+    },
+    "flowering": {
+        "water_requirement": "High",
+        "recommended_soil_moisture": 0.45,
+    },
+    "fruiting": {
+        "water_requirement": "Medium",
+        "recommended_soil_moisture": 0.35,
+    },
+}

@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 from backend.engines.soil_engine import (
     calculate_soil_moisture_status,
     calculate_root_depth,
+    get_crop_stage_parameters,
 )
 
 
@@ -70,3 +71,37 @@ def test_calculate_root_depth_invalid_stage():
     """Test 8: Invalid stage raises ValueError."""
     with pytest.raises(ValueError, match=r"Invalid crop stage .* Valid stages are:"):
         calculate_root_depth("Harvesting")
+
+
+def test_crop_stage_parameters_germination():
+    """Test 9: Parameter lookup for germination stage."""
+    params = get_crop_stage_parameters("germination")
+    assert params["water_requirement"] == "Low"
+    assert params["recommended_soil_moisture"] == 0.20
+
+
+def test_crop_stage_parameters_vegetative():
+    """Test 10: Parameter lookup for vegetative stage."""
+    params = get_crop_stage_parameters("vegetative")
+    assert params["water_requirement"] == "Medium"
+    assert params["recommended_soil_moisture"] == 0.35
+
+
+def test_crop_stage_parameters_flowering():
+    """Test 11: Parameter lookup for flowering stage."""
+    params = get_crop_stage_parameters("flowering")
+    assert params["water_requirement"] == "High"
+    assert params["recommended_soil_moisture"] == 0.45
+
+
+def test_crop_stage_parameters_fruiting():
+    """Test 12: Parameter lookup for fruiting stage."""
+    params = get_crop_stage_parameters("fruiting")
+    assert params["water_requirement"] == "Medium"
+    assert params["recommended_soil_moisture"] == 0.35
+
+
+def test_crop_stage_parameters_invalid_stage():
+    """Test 13: Invalid stage parameter lookup raises ValueError."""
+    with pytest.raises(ValueError, match=r"Invalid crop stage .* Valid stages are:"):
+        get_crop_stage_parameters("dormant")

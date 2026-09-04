@@ -11,17 +11,20 @@ try:
     from backend.config.calibration_data import (
         FIELD_CAPACITY,
         WILTING_POINT,
+        CROP_STAGE_PARAMETERS,
     )
 except ImportError:
     try:
         from config.calibration_data import (
             FIELD_CAPACITY,
             WILTING_POINT,
+            CROP_STAGE_PARAMETERS,
         )
     except ImportError:
         from ..config.calibration_data import (
             FIELD_CAPACITY,
             WILTING_POINT,
+            CROP_STAGE_PARAMETERS,
         )
 
 # Mapping of crop developmental stages to effective root depth in meters
@@ -102,8 +105,42 @@ def calculate_root_depth(crop_stage: str) -> float:
     return ROOT_DEPTH_BY_STAGE[crop_stage]
 
 
+def get_crop_stage_parameters(stage: str) -> Dict[str, Any]:
+    """Retrieves agronomic water requirement and recommended soil moisture parameters for a given crop stage.
+
+    Available stages:
+        - 'germination': {'water_requirement': 'Low', 'recommended_soil_moisture': 0.20}
+        - 'vegetative': {'water_requirement': 'Medium', 'recommended_soil_moisture': 0.35}
+        - 'flowering': {'water_requirement': 'High', 'recommended_soil_moisture': 0.45}
+        - 'fruiting': {'water_requirement': 'Medium', 'recommended_soil_moisture': 0.35}
+
+    Args:
+        stage: Name of the crop stage (case-insensitive string).
+
+    Returns:
+        Dict[str, Any]: Parameter dictionary containing 'water_requirement' and 'recommended_soil_moisture'.
+
+    Raises:
+        TypeError: If stage is not a string.
+        ValueError: If stage is not one of the recognized crop stages.
+    """
+    if not isinstance(stage, str):
+        raise TypeError(f"Parameter 'stage' must be a string. Received {type(stage).__name__}.")
+
+    stage_key = stage.strip().lower()
+
+    if stage_key not in CROP_STAGE_PARAMETERS:
+        valid_stages = ", ".join(CROP_STAGE_PARAMETERS.keys())
+        raise ValueError(f"Invalid crop stage '{stage}'. Valid stages are: {valid_stages}.")
+
+    return CROP_STAGE_PARAMETERS[stage_key]
+
+
 if __name__ == "__main__":
     print(calculate_soil_moisture_status(0.20))
-    print("Root Depths:")
+    print("\nRoot Depths:")
     for stage in ["Seedling", "Vegetative", "Flowering", "Maturity"]:
         print(f"  {stage}: {calculate_root_depth(stage)}m")
+    print("\nCrop Stage Parameters:")
+    for stage in ["germination", "vegetative", "flowering", "fruiting"]:
+        print(f"  {stage}: {get_crop_stage_parameters(stage)}")
