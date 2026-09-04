@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Dict, Any
+import math
 from datetime import datetime, timezone
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import Optional, List, Dict, Any
 
 class Location(BaseModel):
     district: str = Field(default="Beed", description="District name in Maharashtra")
@@ -158,6 +159,8 @@ class ExplainabilityDetails(BaseModel):
     what_changed: List[WhatChangedItem] = Field(default_factory=list, description="Deterministic change list compared to previous decision")
 
 class OverrideParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     wind_speed_kmh: Optional[float] = Field(default=None, ge=0.0, description="Override wind speed in km/h")
     rain_next_36h_mm: Optional[float] = Field(default=None, ge=0.0, description="Override 36h rainfall in mm")
     rain_next_12h_mm: Optional[float] = Field(default=None, ge=0.0, description="Override 12h rainfall in mm")
@@ -165,7 +168,17 @@ class OverrideParams(BaseModel):
     soil_depletion_mm: Optional[float] = Field(default=None, ge=0.0, description="Override soil depletion in mm")
     accumulated_gdd: Optional[float] = Field(default=None, ge=0.0, description="Override accumulated pest GDD")
 
+    @field_validator("*")
+    @classmethod
+    def validate_finite_numbers(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None:
+            if math.isnan(v) or math.isinf(v):
+                raise ValueError("Scenario override values must be finite numbers (NaN and Infinity are forbidden).")
+        return v
+
 class SimulationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     plot_id: str = Field(default="tukaram_beed_01", description="Target plot identifier")
     overrides: Optional[OverrideParams] = Field(default=None, description="Nested dictionary of parameter overrides")
     # Legacy flat fields preserved for compatibility
@@ -176,12 +189,34 @@ class SimulationRequest(BaseModel):
     custom_soil_depletion_mm: Optional[float] = Field(default=None, ge=0.0, description="Override soil depletion in mm")
     custom_accumulated_gdd: Optional[float] = Field(default=None, ge=0.0, description="Override accumulated pest GDD")
 
+    @field_validator("custom_rain_36h_mm", "custom_rain_12h_mm", "custom_rain_prob_6h", "custom_wind_speed_kmh", "custom_soil_depletion_mm", "custom_accumulated_gdd")
+    @classmethod
+    def validate_flat_finite_numbers(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None:
+            if math.isnan(v) or math.isinf(v):
+                raise ValueError("Scenario override values must be finite numbers (NaN and Infinity are forbidden).")
+        return v
+
+class OverrideComparisonItem(BaseModel):
+    current: Optional[Any] = Field(default=None, description="Baseline input value")
+    simulated: Optional[Any] = Field(default=None, description="Simulated override value")
+
+class RuleChangeItem(BaseModel):
+    rule_id: str = Field(..., description="Arbitration rule identifier")
+    previous: bool = Field(..., description="Rule triggered status before simulation")
+    simulated: bool = Field(..., description="Rule triggered status after simulation")
+    impact: str = Field(..., description="Operational impact description")
+
 class SimulationResponse(BaseModel):
     plot_id: str = Field(..., description="Target plot identifier")
     original_decision: DecisionCard = Field(..., description="Baseline decision without overrides")
     simulated_decision: DecisionCard = Field(..., description="Dynamic decision card with user overrides")
     is_flipped: bool = Field(..., description="True if action or prohibition changed")
     flip_reason: str = Field(..., description="Explanation of why the decision flipped")
+    overrides_applied: Dict[str, OverrideComparisonItem] = Field(default_factory=dict, description="Map of overridden field names to before/after values")
+    triggered_rules_before: List[str] = Field(default_factory=list, description="Triggered rule IDs before simulation")
+    triggered_rules_after: List[str] = Field(default_factory=list, description="Triggered rule IDs after simulation")
+    rule_changes: List[RuleChangeItem] = Field(default_factory=list, description="List of rule trigger status changes")
 
 class TranslationRequest(BaseModel):
     decision_card: DecisionCard = Field(..., description="Finalized decision card object")

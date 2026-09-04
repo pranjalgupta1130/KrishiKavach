@@ -21,7 +21,9 @@ from backend.schemas.contracts import (
     PestState,
     WeatherForecast,
     DecisionHistoryItem,
-    RuleTrace
+    RuleTrace,
+    OverrideComparisonItem,
+    RuleChangeItem
 )
 from backend.engines.arbitration import arbitrate_daily_plan
 from backend.engines.pest import calculate_pest_phenology, calculate_gdd
@@ -165,6 +167,7 @@ def simulate_decision(req: SimulationRequest, db: Session = Depends(get_db)):
     """
     Executes What-If decision simulation with user parameter overrides.
     Reuses the EXACT SAME arbitration engine (arbitrate_daily_plan).
+    Performs ZERO database writes.
     """
     plot_id = req.plot_id
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -192,13 +195,16 @@ def simulate_decision(req: SimulationRequest, db: Session = Depends(get_db)):
                 detail=f"Plot '{plot_id}' not found."
             )
 
+    # 1. Capture baseline input state ONCE
     base_weather = fetch_weather_forecast(plot_id, db_plot.latitude, db_plot.longitude, date_str, db)
     base_soil, base_pest = compute_agronomic_states(db_plot, base_weather)
     base_market = fetch_market_state(db_plot.crop_type, f"{db_plot.district} APMC")
 
-    orig_card, _ = arbitrate_daily_plan(plot_id, date_str, base_soil, base_pest, base_weather, base_market)
+    # Baseline arbitration call
+    orig_card, orig_exp = arbitrate_daily_plan(plot_id, date_str, base_soil, base_pest, base_weather, base_market)
     orig_card.translations = translate_decision_card(orig_card, ["mr", "hi"])
 
+    # 2. Clone baseline dictionaries to apply overrides
     sim_weather_dict = base_weather.model_dump()
     sim_soil_dict = base_soil.model_dump()
     sim_pest_dict = base_pest.model_dump()
@@ -212,50 +218,128 @@ def simulate_decision(req: SimulationRequest, db: Session = Depends(get_db)):
     soil_depletion_override = (ov.soil_depletion_mm if ov and ov.soil_depletion_mm is not None else req.custom_soil_depletion_mm)
     gdd_override = (ov.accumulated_gdd if ov and ov.accumulated_gdd is not None else req.custom_accumulated_gdd)
 
+    overrides_applied: Dict[str, OverrideComparisonItem] = {}
+
     if wind_override is not None:
+        overrides_applied["wind_speed_kmh"] = OverrideComparisonItem(current=base_weather.wind_speed_kmh, simulated=wind_override)
         sim_weather_dict["wind_speed_kmh"] = wind_override
     if rain_36h_override is not None:
+        overrides_applied["rain_next_36h_mm"] = OverrideComparisonItem(current=base_weather.rain_next_36h_mm, simulated=rain_36h_override)
         sim_weather_dict["rain_next_36h_mm"] = rain_36h_override
     if rain_12h_override is not None:
+        overrides_applied["rain_next_12h_mm"] = OverrideComparisonItem(current=base_weather.rain_next_12h_mm, simulated=rain_12h_override)
         sim_weather_dict["rain_next_12h_mm"] = rain_12h_override
     if rain_prob_override is not None:
+        overrides_applied["rain_prob_next_6h"] = OverrideComparisonItem(current=base_weather.rain_prob_next_6h, simulated=rain_prob_override)
         sim_weather_dict["rain_prob_next_6h"] = rain_prob_override
 
     sim_weather = WeatherForecast(**sim_weather_dict)
 
     if soil_depletion_override is not None:
+        overrides_applied["soil_depletion_mm"] = OverrideComparisonItem(current=base_soil.depletion_mm, simulated=soil_depletion_override)
         sim_soil_dict["depletion_mm"] = soil_depletion_override
         sim_soil_dict["moisture_status"] = "MOISTURE_STRESS" if soil_depletion_override >= sim_soil_dict["raw_mm"] else "MOISTURE_ADEQUATE"
     sim_soil = SoilState(**sim_soil_dict)
 
     if gdd_override is not None:
+        overrides_applied["accumulated_gdd"] = OverrideComparisonItem(current=base_pest.accumulated_gdd, simulated=gdd_override)
         sim_pest_dict["accumulated_gdd"] = gdd_override
         sim_pest_dict["risk_triggered"] = gdd_override >= sim_pest_dict["gdd_threshold"]
     sim_pest = PestState(**sim_pest_dict)
 
+    # 3. Execute SAME arbitration engine on simulated state
     sim_card, sim_exp = arbitrate_daily_plan(plot_id, date_str, sim_soil, sim_pest, sim_weather, base_market)
     sim_card.translations = translate_decision_card(sim_card, ["mr", "hi"])
 
+    # 4. Compare rule traces and identify rule changes
+    before_traces = {t.rule_id: t for t in orig_exp.rule_traces}
+    after_traces = {t.rule_id: t for t in sim_exp.rule_traces}
+
+    triggered_rules_before = [r_id for r_id, t in before_traces.items() if t.triggered]
+    triggered_rules_after = [r_id for r_id, t in after_traces.items() if t.triggered]
+
+    rule_changes: List[RuleChangeItem] = []
+    all_rule_ids = set(before_traces.keys()).union(set(after_traces.keys()))
+
+    for r_id in sorted(all_rule_ids):
+        prev_trig = before_traces[r_id].triggered if r_id in before_traces else False
+        sim_trig = after_traces[r_id].triggered if r_id in after_traces else False
+
+        if prev_trig != sim_trig:
+            if r_id == "RULE_PEST_WIND_01":
+                impact = "Spray prohibition removed" if not sim_trig else "Spray prohibition enforced due to high wind"
+            elif r_id == "RULE_PEST_RAIN_01":
+                impact = "Spray prohibition removed" if not sim_trig else "Spray prohibition enforced due to rain wash-off risk"
+            elif r_id == "RULE_HYDRO_01":
+                impact = "Irrigation suppression removed" if not sim_trig else "Irrigation suppressed due to rain forecast"
+            elif r_id == "RULE_HYDRO_02":
+                impact = "Irrigation approved" if sim_trig else "Irrigation approval revoked"
+            elif r_id == "RULE_PEST_SPRAY_OK":
+                impact = "Pesticide spray approved" if sim_trig else "Pesticide spray approval revoked"
+            else:
+                impact = f"Rule {r_id} state changed from {prev_trig} to {sim_trig}"
+
+            rule_changes.append(RuleChangeItem(
+                rule_id=r_id,
+                previous=prev_trig,
+                simulated=sim_trig,
+                impact=impact
+            ))
+
+    # 5. Determine if decision flipped materially
     is_flipped = (
         orig_card.primary_action != sim_card.primary_action or
         orig_card.critical_prohibition != sim_card.critical_prohibition
     )
 
+    # 6. Generate deterministic flip_reason
     if is_flipped:
-        flip_reason = (
-            f"Operational decision flipped! Primary action changed from '{orig_card.primary_action}' "
-            f"to '{sim_card.primary_action}'. Critical prohibition updated from '{orig_card.critical_prohibition}' "
-            f"to '{sim_card.critical_prohibition}' due to parameter overrides."
-        )
+        if any(rc.rule_id == "RULE_PEST_WIND_01" for rc in rule_changes):
+            wind_val = sim_weather.wind_speed_kmh
+            flip_reason = (
+                f"Spraying restriction was removed because simulated wind speed ({wind_val:.1f} km/h) "
+                f"fell within the configured spray-safe limit ({settings.WIND_SAFE_LIMIT_KMH:.1f} km/h)."
+            )
+        elif any(rc.rule_id == "RULE_HYDRO_01" for rc in rule_changes):
+            rain_val = sim_weather.rain_next_36h_mm
+            flip_reason = (
+                f"Irrigation restriction was updated because simulated 36-hour rainfall ({rain_val:.1f} mm) "
+                f"changed relative to the irrigation suppression threshold ({settings.RAIN_IRRIGATION_SUPPRESS_MM_36H:.1f} mm)."
+            )
+        elif any(rc.rule_id == "RULE_PEST_RAIN_01" for rc in rule_changes):
+            flip_reason = (
+                f"Foliar spray restriction was updated because simulated rainfall probability/amount "
+                f"changed relative to the spray wash-off safety limits."
+            )
+        else:
+            flip_reason = (
+                f"Operational decision flipped! Primary action updated from '{orig_card.primary_action}' "
+                f"to '{sim_card.primary_action}' due to parameter overrides."
+            )
     else:
-        flip_reason = "No operational decision flip triggered. Advisory parameters remain unchanged."
+        if wind_override is not None and wind_override > settings.WIND_SAFE_LIMIT_KMH:
+            flip_reason = (
+                f"Decision unchanged because simulated wind speed ({wind_override:.1f} km/h) "
+                f"remains above the configured spray-safe limit ({settings.WIND_SAFE_LIMIT_KMH:.1f} km/h)."
+            )
+        elif rain_36h_override is not None and rain_36h_override >= settings.RAIN_IRRIGATION_SUPPRESS_MM_36H:
+            flip_reason = (
+                f"Decision unchanged because simulated 36-hour rainfall ({rain_36h_override:.1f} mm) "
+                f"remains above the irrigation suppression threshold ({settings.RAIN_IRRIGATION_SUPPRESS_MM_36H:.1f} mm)."
+            )
+        else:
+            flip_reason = "Decision unchanged. Operational recommendations remain identical to baseline."
 
     return SimulationResponse(
         plot_id=plot_id,
         original_decision=orig_card,
         simulated_decision=sim_card,
         is_flipped=is_flipped,
-        flip_reason=flip_reason
+        flip_reason=flip_reason,
+        overrides_applied=overrides_applied,
+        triggered_rules_before=triggered_rules_before,
+        triggered_rules_after=triggered_rules_after,
+        rule_changes=rule_changes
     )
 
 
