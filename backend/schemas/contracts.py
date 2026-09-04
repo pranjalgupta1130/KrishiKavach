@@ -75,12 +75,20 @@ class DecisionCard(BaseModel):
     translations: Dict[str, Dict[str, str]] = Field(default_factory=dict, description="Vernacular translations (mr, hi)")
     model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
 
+class RejectedAction(BaseModel):
+    candidate_action: str = Field(..., description="Blocked candidate operation (e.g. TUBEVILL_IRRIGATION, CHEMICAL_PESTICIDE_SPRAY)")
+    blocked_by_rule_id: str = Field(..., description="ID of rule that blocked the action")
+    reason: str = Field(..., description="Detailed explanation of why candidate action was rejected")
+
 class RuleTrace(BaseModel):
     rule_id: str = Field(..., description="Identifier of the arbitration rule")
     rule_name: str = Field(..., description="Human-readable rule name")
+    priority: int = Field(default=50, description="Rule precedence priority (100 = highest safety constraint)")
     triggered: bool = Field(..., description="Whether rule conditions were satisfied")
     condition_evaluated: str = Field(..., description="Numeric expression evaluated")
     effect: str = Field(..., description="Action or prohibition output applied")
+    decision_impact: Optional[str] = Field(default=None, description="FINAL_PROHIBITION, FINAL_ACTION, OVERRIDDEN, or NOMINAL")
+    why_not: Optional[str] = Field(default=None, description="Structured explanation of why a candidate action was blocked")
 
 class ExplainabilityDetails(BaseModel):
     decision_id: str = Field(..., description="Corresponding decision ID")
@@ -92,6 +100,8 @@ class ExplainabilityDetails(BaseModel):
     market_metrics: Dict[str, float] = Field(..., description="Modal price, SMA7, Momentum %")
     confidence_indicator: str = Field(..., description="Source of data")
     rule_traces: List[RuleTrace] = Field(..., description="Auditable trace of all arbitration rules evaluated")
+    conflicts_detected: List[str] = Field(default_factory=list, description="List of detected environmental-agronomic conflicts")
+    rejected_actions: List[RejectedAction] = Field(default_factory=list, description="Structured list of candidate actions blocked by arbitration")
     model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
 
 class OverrideParams(BaseModel):

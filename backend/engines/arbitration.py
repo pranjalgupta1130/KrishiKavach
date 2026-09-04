@@ -1,5 +1,5 @@
 """
-Conflict Arbitration Engine - Core Deterministic Decision Layer
+Conflict Arbitration Engine 2.0 - Core Deterministic Decision Layer
 
 Central authority for resolving operational contradictions between agronomic needs
 and forecast environmental risks. Used by both the Daily Decision endpoint and
@@ -21,7 +21,8 @@ from backend.schemas.contracts import (
     MarketState,
     DecisionCard,
     ExplainabilityDetails,
-    RuleTrace
+    RuleTrace,
+    RejectedAction
 )
 
 def arbitrate_daily_plan(
@@ -38,6 +39,8 @@ def arbitrate_daily_plan(
     """
     rationales: List[str] = []
     rule_traces: List[RuleTrace] = []
+    conflicts_detected: List[str] = []
+    rejected_actions: List[RejectedAction] = []
 
     # Decision flags
     hydro_state = "NOMINAL"  # PROHIBITED, APPROVED, NOMINAL
@@ -54,17 +57,27 @@ def arbitrate_daily_plan(
         if rain_36h >= rain_suppress_limit:
             # Conflict Detected: Moisture stressed, but heavy rain forecast in 36h!
             hydro_state = "PROHIBITED"
-            rationales.append(
+            conflicts_detected.append("HYDROLOGICAL_RAIN_CONFLICT")
+            reject_reason = (
                 f"Soil depletion is {soil_state.depletion_mm:.1f}mm (RAW threshold: {soil_state.raw_mm:.1f}mm), "
                 f"but {rain_36h:.1f}mm precipitation is forecast within 36 hours (threshold: {rain_suppress_limit:.1f}mm). "
                 f"Irrigation will induce severe waterlogging and root rot in medium black vertisol."
             )
+            rationales.append(reject_reason)
+            rejected_actions.append(RejectedAction(
+                candidate_action="TUBEVILL_IRRIGATION",
+                blocked_by_rule_id="RULE_HYDRO_01",
+                reason=reject_reason
+            ))
             rule_traces.append(RuleTrace(
                 rule_id="RULE_HYDRO_01",
                 rule_name="Hydrological Rain Conflict Arbitration",
+                priority=80,
                 triggered=True,
                 condition_evaluated=f"depletion ({soil_state.depletion_mm:.1f}mm) >= RAW ({soil_state.raw_mm:.1f}mm) AND rain_36h ({rain_36h:.1f}mm) >= threshold ({rain_suppress_limit:.1f}mm)",
-                effect="Suppressed irrigation; mandated drainage trench clearing."
+                effect="Suppressed irrigation; mandated drainage trench clearing.",
+                decision_impact="FINAL_PROHIBITION",
+                why_not="Tubewell irrigation rejected because heavy rain is forecast within 36 hours."
             ))
         else:
             # Moisture stressed & skies clear/low rain -> Apply controlled irrigation
@@ -76,9 +89,11 @@ def arbitrate_daily_plan(
             rule_traces.append(RuleTrace(
                 rule_id="RULE_HYDRO_02",
                 rule_name="Irrigation Approval",
+                priority=60,
                 triggered=True,
                 condition_evaluated=f"depletion ({soil_state.depletion_mm:.1f}mm) >= RAW ({soil_state.raw_mm:.1f}mm) AND rain_36h ({rain_36h:.1f}mm) < threshold ({rain_suppress_limit:.1f}mm)",
-                effect="Approved controlled irrigation."
+                effect="Approved controlled irrigation.",
+                decision_impact="FINAL_ACTION"
             ))
     else:
         hydro_state = "NOMINAL"
@@ -89,9 +104,11 @@ def arbitrate_daily_plan(
         rule_traces.append(RuleTrace(
             rule_id="RULE_HYDRO_03",
             rule_name="Moisture Adequacy",
+            priority=40,
             triggered=False,
             condition_evaluated=f"depletion ({soil_state.depletion_mm:.1f}mm) < RAW ({soil_state.raw_mm:.1f}mm)",
-            effect="No irrigation required."
+            effect="No irrigation required.",
+            decision_impact="NOMINAL"
         ))
 
     # -------------------------------------------------------------------------
@@ -110,32 +127,52 @@ def arbitrate_daily_plan(
         if wind_speed > wind_limit:
             # Conflict Detected: Pest threshold crossed, but wind speed > limit!
             spray_state = "WIND_BLOCKED"
-            rationales.append(
+            conflicts_detected.append("PEST_WIND_DRIFT_CONFLICT")
+            reject_reason = (
                 f"{pest_display_name} emergence threshold reached ({pest_state.accumulated_gdd:.0f} GDD >= {pest_state.gdd_threshold:.0f} GDD), "
                 f"but sustained wind speed ({wind_speed:.1f} km/h) exceeds safe spraying limit ({wind_limit:.1f} km/h). "
                 f"Chemical spraying will cause severe drift off-target."
             )
+            rationales.append(reject_reason)
+            rejected_actions.append(RejectedAction(
+                candidate_action="CHEMICAL_PESTICIDE_SPRAY",
+                blocked_by_rule_id="RULE_PEST_WIND_01",
+                reason=reject_reason
+            ))
             rule_traces.append(RuleTrace(
                 rule_id="RULE_PEST_WIND_01",
                 rule_name="Biochemical Drift Spray Block",
+                priority=100,
                 triggered=True,
                 condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) >= threshold ({pest_state.gdd_threshold:.0f}) AND wind ({wind_speed:.1f} km/h) > limit ({wind_limit:.1f} km/h)",
-                effect="Blocked chemical spraying; mandated pheromone traps."
+                effect="Blocked chemical spraying; mandated pheromone traps.",
+                decision_impact="FINAL_PROHIBITION",
+                why_not="Chemical spraying rejected because wind speed exceeds the safe threshold limit."
             ))
         elif rain_prob_6h > rain_prob_limit or rain_12h >= rain_12h_limit:
             # Conflict Detected: Pest threshold crossed, but rain probability/rain in 12h will wash off spray!
             spray_state = "RAIN_BLOCKED"
-            rationales.append(
+            conflicts_detected.append("PEST_RAIN_WASHOFF_CONFLICT")
+            reject_reason = (
                 f"{pest_display_name} emergence threshold reached ({pest_state.accumulated_gdd:.0f} GDD), "
                 f"but imminent rain forecast (probability {rain_prob_6h:.0f}% in 6h / {rain_12h:.1f}mm in 12h) "
                 f"will wash off foliar treatments, wasting chemical investment."
             )
+            rationales.append(reject_reason)
+            rejected_actions.append(RejectedAction(
+                candidate_action="FOLIAR_CHEMICAL_SPRAY",
+                blocked_by_rule_id="RULE_PEST_RAIN_01",
+                reason=reject_reason
+            ))
             rule_traces.append(RuleTrace(
                 rule_id="RULE_PEST_RAIN_01",
                 rule_name="Foliar Spray Rain Wash-Off Block",
+                priority=90,
                 triggered=True,
                 condition_evaluated=f"rain_prob_6h ({rain_prob_6h:.0f}%) > limit ({rain_prob_limit:.0f}%) OR rain_12h ({rain_12h:.1f}mm) >= limit ({rain_12h_limit:.1f}mm)",
-                effect="Blocked foliar spray due to rain wash-off risk."
+                effect="Blocked foliar spray due to rain wash-off risk.",
+                decision_impact="FINAL_PROHIBITION",
+                why_not="Foliar spraying rejected because imminent rain will cause wash-off."
             ))
         else:
             # Atmospheric conditions safe -> Apply recommended biopesticide/spray
@@ -147,9 +184,11 @@ def arbitrate_daily_plan(
             rule_traces.append(RuleTrace(
                 rule_id="RULE_PEST_SPRAY_OK",
                 rule_name="Pest Spray Approval",
+                priority=70,
                 triggered=True,
                 condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) >= threshold ({pest_state.gdd_threshold:.0f}) AND atmospheric conditions safe",
-                effect="Approved targeted chemical/bio-pesticide spray."
+                effect="Approved targeted chemical/bio-pesticide spray.",
+                decision_impact="FINAL_ACTION"
             ))
     else:
         spray_state = "NOMINAL"
@@ -160,9 +199,11 @@ def arbitrate_daily_plan(
         rule_traces.append(RuleTrace(
             rule_id="RULE_PEST_NO_RISK",
             rule_name="Pest Threshold Nominal",
+            priority=30,
             triggered=False,
             condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) < threshold ({pest_state.gdd_threshold:.0f})",
-            effect="No chemical spray required."
+            effect="No chemical spray required.",
+            decision_impact="NOMINAL"
         ))
 
     # -------------------------------------------------------------------------
@@ -173,6 +214,15 @@ def arbitrate_daily_plan(
             f"Market price for {market_state.crop_type} at {market_state.mandi_name} is favorable "
             f"({market_state.modal_price_inr:.0f} INR/q, +{market_state.price_momentum_percent:.1f}% vs 7-day average)."
         )
+        rule_traces.append(RuleTrace(
+            rule_id="RULE_MARKET_01",
+            rule_name="Market Price Momentum Support",
+            priority=20,
+            triggered=True,
+            condition_evaluated=f"trend ({market_state.trend}) == FAVORABLE AND momentum ({market_state.price_momentum_percent:.1f}%) >= 2.0%",
+            effect="Added market momentum rationale.",
+            decision_impact="MARKET_CONTEXT"
+        ))
 
     # -------------------------------------------------------------------------
     # 4. Synthesize ONE Primary Action & ONE Critical Prohibition
@@ -214,6 +264,15 @@ def arbitrate_daily_plan(
         primary_action_str = "Apply recommended bio-pesticide or targeted chemical spray with PPE"
     else:
         primary_action_str = "Perform routine field inspection and soil maintenance"
+        rule_traces.append(RuleTrace(
+            rule_id="RULE_ROUTINE_01",
+            rule_name="Routine Field Operation Fallback",
+            priority=10,
+            triggered=True,
+            condition_evaluated="hydro_state == NOMINAL AND spray_state == NOMINAL",
+            effect="Perform routine field inspection.",
+            decision_impact="FINAL_ACTION"
+        ))
 
     scientific_rationale_str = " ".join(rationales)
 
@@ -269,6 +328,8 @@ def arbitrate_daily_plan(
         },
         confidence_indicator=weather_forecast.source,
         rule_traces=rule_traces,
+        conflicts_detected=conflicts_detected,
+        rejected_actions=rejected_actions,
         model_version=model_provenance
     )
 
