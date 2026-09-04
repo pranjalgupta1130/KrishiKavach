@@ -37,7 +37,7 @@ def test_valid_nested_override_returns_200(client):
 
 
 def test_wind_override_reaches_arbitration(client):
-    """Verify wind override actively changes the simulated decision card rationale."""
+    """Verify wind override reaches central arbitration engine and updates structured decision state."""
     payload = {
         "plot_id": "tukaram_beed_01",
         "overrides": {"wind_speed_kmh": 5.0}
@@ -45,8 +45,19 @@ def test_wind_override_reaches_arbitration(client):
     res = client.post("/api/v1/decision/simulate", json=payload)
     assert res.status_code == 200
     data = res.json()
-    sim_rat = data["simulated_decision"]["scientific_rationale"]
-    assert "5.0 km/h" in sim_rat or "5 km/h" in sim_rat or "safe atmospheric conditions" in sim_rat
+
+    # 1. Structured override tracking check
+    assert "wind_speed_kmh" in data["overrides_applied"]
+    assert data["overrides_applied"]["wind_speed_kmh"]["simulated"] == 5.0
+
+    # 2. Structured rule change and prohibition check
+    if "RULE_PEST_WIND_01" in data["triggered_rules_before"]:
+        assert "RULE_PEST_WIND_01" not in data["triggered_rules_after"]
+        rc_map = {rc["rule_id"]: rc for rc in data["rule_changes"]}
+        assert "RULE_PEST_WIND_01" in rc_map
+        assert rc_map["RULE_PEST_WIND_01"]["previous"] is True
+        assert rc_map["RULE_PEST_WIND_01"]["simulated"] is False
+        assert "DO NOT SPRAY PESTICIDES OR CHEMICALS" not in data["simulated_decision"]["critical_prohibition"]
 
 
 def test_rain_override_reaches_arbitration(client):
