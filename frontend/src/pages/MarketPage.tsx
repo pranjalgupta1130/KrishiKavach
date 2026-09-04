@@ -3,30 +3,30 @@ import {
   TrendingUp,
   Store,
   MapPin,
-  Sparkles,
   Info,
-  DollarSign,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { useFieldContext } from '../contexts/FieldContext';
-import { useDailyDecision, useExplainability } from '../hooks/useDecision';
+import { useDailyDecision, useMarketData } from '../hooks/useDecision';
 import { useLanguage } from '../contexts/LanguageContext';
 import { TrendChartsSection } from '../components/TrendChartsSection';
 
 export const MarketPage: React.FC = () => {
   const { activePlotId, activePlot } = useFieldContext();
   const { data: decision } = useDailyDecision(activePlotId);
-  const { data: explainability } = useExplainability(decision?.explainability_id || null);
+  const { data: market, isLoading, isError, error } = useMarketData(activePlotId);
   const { t } = useLanguage();
 
-  const marketMetrics = explainability?.market_metrics || {};
-  const modalPrice = marketMetrics.modal_price_inr || 7150;
-  const sma7 = marketMetrics.sma_7_inr || 6980;
-  const momentumPct = marketMetrics.price_momentum_percent || 2.43;
+  const modalPrice = market?.current_price ?? 7150;
+  const sma7 = market?.moving_average ?? 6980;
+  const momentumPct = market?.momentum ?? 2.43;
   const isPositive = momentumPct >= 0;
-  const cropLabel = activePlot?.crop_type === 'bt_cotton' ? 'Bt Cotton' : activePlot?.crop_type === 'soybean' ? 'Soybean' : activePlot?.crop_type || 'Crop';
+  const cropLabel = market?.crop || (activePlot?.crop_type === 'bt_cotton' ? 'Bt Cotton' : activePlot?.crop_type === 'soybean' ? 'Soybean' : activePlot?.crop_type || 'Crop');
   const mandiName = activePlot ? `${activePlot.location.district} APMC` : 'Local APMC Mandi';
+  const dataStatus = market?.data_status || 'FALLBACK';
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
@@ -48,58 +48,81 @@ export const MarketPage: React.FC = () => {
 
         <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs font-bold shrink-0">
           <Store className="w-4 h-4 text-emerald-700" />
-          <span>Agmarknet API</span>
+          <span>{market?.source || 'Agmarknet APMC Intelligence'}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-black ${
+            dataStatus === 'LIVE' ? 'bg-emerald-700 text-white' : 'bg-amber-600 text-white'
+          }`}>
+            {dataStatus}
+          </span>
         </div>
       </div>
+
+      {/* Loading State */}
+      {isLoading && (
+        <div className="p-8 text-center bg-white border border-slate-200 rounded-2xl space-y-3">
+          <Loader2 className="w-8 h-8 text-emerald-700 animate-spin mx-auto" />
+          <p className="text-xs font-bold text-slate-700">Retrieving APMC mandi prices & momentum...</p>
+        </div>
+      )}
+
+      {/* Error State */}
+      {isError && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3 text-xs font-bold text-red-900">
+          <AlertCircle className="w-5 h-5 text-red-700 shrink-0" />
+          <span>{error?.message || 'Could not load market data.'}</span>
+        </div>
+      )}
 
       {/* Key Market Indicators Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Current Modal Price */}
-        <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-1">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
-            Current Mandi Modal Price
-          </span>
-          <p className="text-3xl font-black text-slate-900">
-            ₹{modalPrice.toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">/ quintal</span>
-          </p>
-          <p className="text-xs text-slate-600 font-medium">
-            Modal rate at {mandiName}
-          </p>
-        </div>
-
-        {/* 7-Day Moving Average */}
-        <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-1">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
-            7-Day Moving Average
-          </span>
-          <p className="text-3xl font-black text-slate-900">
-            ₹{sma7.toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">/ quintal</span>
-          </p>
-          <p className="text-xs text-slate-600 font-medium">
-            7-day baseline price trend
-          </p>
-        </div>
-
-        {/* Price Momentum */}
-        <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-1">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
-            Price Momentum
-          </span>
-          <div className="flex items-center gap-2">
-            <p className={`text-3xl font-black ${isPositive ? 'text-emerald-700' : 'text-rose-700'}`}>
-              {isPositive ? `+${momentumPct.toFixed(2)}%` : `${momentumPct.toFixed(2)}%`}
+      {!isLoading && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Current Modal Price */}
+          <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+              Current Mandi Modal Price
+            </span>
+            <p className="text-3xl font-black text-slate-900">
+              ₹{modalPrice.toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">/ quintal</span>
             </p>
-            {isPositive ? (
-              <ArrowUpRight className="w-6 h-6 text-emerald-700" />
-            ) : (
-              <ArrowDownRight className="w-6 h-6 text-rose-700" />
-            )}
+            <p className="text-xs text-slate-600 font-medium">
+              Modal rate at {mandiName}
+            </p>
           </div>
-          <p className="text-xs text-slate-600 font-medium">
-            {isPositive ? 'Favorable market price momentum' : 'Market price below 7-day average'}
-          </p>
+
+          {/* 7-Day Moving Average */}
+          <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+              7-Day Moving Average
+            </span>
+            <p className="text-3xl font-black text-slate-900">
+              ₹{sma7.toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">/ quintal</span>
+            </p>
+            <p className="text-xs text-slate-600 font-medium">
+              7-day baseline price trend
+            </p>
+          </div>
+
+          {/* Price Momentum */}
+          <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+              Price Momentum
+            </span>
+            <div className="flex items-center gap-2">
+              <p className={`text-3xl font-black ${isPositive ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {isPositive ? `+${momentumPct.toFixed(2)}%` : `${momentumPct.toFixed(2)}%`}
+              </p>
+              {isPositive ? (
+                <ArrowUpRight className="w-6 h-6 text-emerald-700" />
+              ) : (
+                <ArrowDownRight className="w-6 h-6 text-rose-700" />
+              )}
+            </div>
+            <p className="text-xs text-slate-600 font-medium">
+              {isPositive ? 'Favorable market price momentum' : 'Market price below 7-day average'}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Recharts Visualization Section */}
       <TrendChartsSection decisionId={decision?.explainability_id || decision?.decision_id || null} />

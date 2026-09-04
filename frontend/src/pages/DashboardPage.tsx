@@ -31,6 +31,7 @@ export const DashboardPage: React.FC = () => {
 
   const [showWhatIf, setShowWhatIf] = useState(false);
   const [showExplainability, setShowExplainability] = useState(false);
+  const [simulatedResult, setSimulatedResult] = useState<import('../types/api').SimulationResponse | null>(null);
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
@@ -72,7 +73,12 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* 2. Primary Decision Card */}
-      <DailyDecisionCard plotId={activePlotId} />
+      <DailyDecisionCard
+        plotId={activePlotId}
+        simulatedDecision={simulatedResult?.simulated_decision}
+        isSimulatedMode={!!simulatedResult}
+        onResetSimulation={() => setSimulatedResult(null)}
+      />
 
       {/* 3. Concise Metrics Strip */}
       {explainability && (
@@ -202,7 +208,7 @@ export const DashboardPage: React.FC = () => {
       {/* 5. Embedded What-If Simulation Controls (Togglable / Active) */}
       {showWhatIf && (
         <div className="animate-fade-in border-2 border-amber-300 rounded-2xl p-1 bg-amber-50/50">
-          <WhatIfControls plotId={activePlotId} />
+          <WhatIfControls plotId={activePlotId} onSimulationResult={(res) => setSimulatedResult(res)} />
         </div>
       )}
 

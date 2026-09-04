@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     WIND_SAFE_LIMIT_KMH: float = 15.0
 
     # Rule 3: Foliar Spray Rain Wash-Off Thresholds
-    RAIN_PROB_SPRAY_BLOCK_PCT_6H: float = 70.0
-    RAIN_WASH_OFF_MM_12H: float = 5.0
+    RAIN_PROB_SPRAY_BLOCK_PCT_6H: float = 60.0
+    RAIN_WASH_OFF_MM_12H: float = 10.0
 
     # Soil Constants - Medium Black Vertisol (Consuming Member 1's calibration parameters)
     VERTISOL_FC: float = FIELD_CAPACITY

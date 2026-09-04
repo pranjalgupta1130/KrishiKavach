@@ -9,9 +9,17 @@ import { DecisionCard } from '../types/api';
 
 interface DailyDecisionCardProps {
   plotId: string;
+  simulatedDecision?: DecisionCard | null;
+  isSimulatedMode?: boolean;
+  onResetSimulation?: () => void;
 }
 
-export const DailyDecisionCard: React.FC<DailyDecisionCardProps> = ({ plotId }) => {
+export const DailyDecisionCard: React.FC<DailyDecisionCardProps> = ({
+  plotId,
+  simulatedDecision,
+  isSimulatedMode,
+  onResetSimulation
+}) => {
   const { language, t } = useLanguage();
   const { data: liveDecision, isLoading, isError, error, refetch, isFetching } = useDailyDecision(plotId);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -40,12 +48,12 @@ export const DailyDecisionCard: React.FC<DailyDecisionCardProps> = ({ plotId }) 
     }
   }, [liveDecision]);
 
-  // Determine active decision object (Live or Cached Fallback)
-  const activeDecision = liveDecision || (isError || isOfflineMode ? cachedDecision : null);
-  const isUsingCache = !liveDecision && !!cachedDecision;
+  // Determine active decision object (Simulated -> Live -> Cached Fallback)
+  const activeDecision = simulatedDecision || liveDecision || (isError || isOfflineMode ? cachedDecision : null);
+  const isUsingCache = !simulatedDecision && !liveDecision && !!cachedDecision;
   const lastUpdatedTime = offlineStorage.getLastUpdated();
 
-  // 1. Loading State (Only if no cached decision exists)
+  // 1. Loading State (Only if no active decision exists)
   if (isLoading && !activeDecision) {
     return (
       <div className="farmer-card border-l-4 border-l-emerald-600 bg-white p-6 space-y-4 animate-pulse">
@@ -107,7 +115,33 @@ export const DailyDecisionCard: React.FC<DailyDecisionCardProps> = ({ plotId }) 
 
   return (
     <>
-      <div className="farmer-card border-l-4 border-l-emerald-600 bg-white space-y-4 shadow-sm">
+      <div className={`farmer-card border-l-4 bg-white space-y-4 shadow-sm ${isSimulatedMode ? 'border-l-purple-600 ring-2 ring-purple-300' : 'border-l-emerald-600'}`}>
+        {/* Simulated Decision Mode Alert Banner */}
+        {isSimulatedMode && (
+          <div className="p-3.5 rounded-xl bg-purple-100/90 border-2 border-purple-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-purple-950 shadow-xs">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-purple-700 shrink-0" />
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-purple-950">
+                  🧪 SIMULATED DECISION MODE (WHAT-IF SCENARIO)
+                </p>
+                <p className="text-xs font-medium text-purple-900 leading-tight">
+                  This advice is calculated from parameter overrides and is NOT live field advice.
+                </p>
+              </div>
+            </div>
+            {onResetSimulation && (
+              <button
+                type="button"
+                onClick={onResetSimulation}
+                className="px-3 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-900 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs border border-purple-900 min-h-[34px]"
+              >
+                Reset to Live Today's Advice
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Offline Banner Indicator if using cached decision */}
         {isUsingCache && (
           <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-300 flex items-center justify-between gap-2 text-xs font-bold text-amber-950">

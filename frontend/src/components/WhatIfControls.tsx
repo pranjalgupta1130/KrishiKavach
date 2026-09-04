@@ -6,9 +6,10 @@ import { SimulationResponse } from '../types/api';
 
 interface WhatIfControlsProps {
   plotId: string;
+  onSimulationResult?: (result: SimulationResponse | null) => void;
 }
 
-export const WhatIfControls: React.FC<WhatIfControlsProps> = ({ plotId }) => {
+export const WhatIfControls: React.FC<WhatIfControlsProps> = ({ plotId, onSimulationResult }) => {
   const { language, t } = useLanguage();
   const simulateMutation = useSimulateDecision();
 
@@ -44,17 +45,26 @@ export const WhatIfControls: React.FC<WhatIfControlsProps> = ({ plotId }) => {
     }
 
     setSimError(null);
+
+    const overrides: Record<string, number> = {
+      wind_speed_kmh: windSpeed,
+      rain_next_36h_mm: rain36h,
+    };
+
+    if (rain36h === 0) {
+      overrides.rain_next_12h_mm = 0.0;
+      overrides.rain_prob_next_6h = 0.0;
+    }
+
     simulateMutation.mutate(
       {
         plot_id: plotId,
-        overrides: {
-          wind_speed_kmh: windSpeed,
-          rain_next_36h_mm: rain36h,
-        },
+        overrides,
       },
       {
         onSuccess: (data) => {
           setSimResult(data);
+          onSimulationResult?.(data);
         },
         onError: (err) => {
           setSimError(err.message || t.simErrorTitle);
@@ -69,6 +79,7 @@ export const WhatIfControls: React.FC<WhatIfControlsProps> = ({ plotId }) => {
     setRain36h(28.0);
     setSimResult(null);
     setSimError(null);
+    onSimulationResult?.(null);
   };
 
   // Resolve Vernacular Strings for Simulated Decision
@@ -122,6 +133,39 @@ export const WhatIfControls: React.FC<WhatIfControlsProps> = ({ plotId }) => {
           <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
           <span>{t.resetWeatherButton}</span>
         </button>
+      </div>
+
+      {/* Preset Scenarios Strip */}
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+          Quick Preset Scenarios
+        </span>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+          <button
+            type="button"
+            onClick={() => { setWindSpeed(8.0); setRain36h(28.0); setSimResult(null); }}
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 cursor-pointer"
+          >
+            <Wind className="w-3.5 h-3.5 text-emerald-700" />
+            <span>🍃 Safe Wind (8 km/h)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setWindSpeed(18.5); setRain36h(0.0); setSimResult(null); }}
+            className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 flex items-center gap-1 cursor-pointer"
+          >
+            <CloudRain className="w-3.5 h-3.5 text-blue-700" />
+            <span>☀️ Clear Rain (0 mm)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setWindSpeed(8.0); setRain36h(0.0); setSimResult(null); }}
+            className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 flex items-center gap-1 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-700" />
+            <span>💧 Combined Safe</span>
+          </button>
+        </div>
       </div>
 
       {/* Interactive Controls / Sliders */}

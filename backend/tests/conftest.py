@@ -1,4 +1,6 @@
 import pytest
+import httpx
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -15,6 +17,19 @@ def setup_test_db():
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture(autouse=True)
+def mock_live_weather_api():
+    """Mock live Open-Meteo API during test suite to guarantee deterministic test execution without network dependency."""
+    original_get = httpx.Client.get
+
+    def _mock_get(self, url, *args, **kwargs):
+        if "open-meteo.com" in str(url):
+            raise httpx.ConnectTimeout("Mocked network timeout for test suite determinism")
+        return original_get(self, url, *args, **kwargs)
+
+    with patch.object(httpx.Client, "get", side_effect=_mock_get, autospec=True):
+        yield
 
 @pytest.fixture
 def db_session():
@@ -38,3 +53,4 @@ def client(db_session):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+

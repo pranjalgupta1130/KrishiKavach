@@ -242,3 +242,45 @@ class TranslationRequest(BaseModel):
 class TranslationResponse(BaseModel):
     decision_id: str = Field(..., description="Decision ID")
     translations: Dict[str, Dict[str, str]] = Field(..., description="Map of lang -> translated fields")
+
+class CropHealthResponse(BaseModel):
+    plot_id: str = Field(..., description="Target plot ID")
+    crop: str = Field(..., description="Crop type")
+    crop_stage: str = Field(..., description="Phenological crop growth stage")
+    days_after_sowing: int = Field(..., ge=0, description="Days elapsed since sowing")
+    pest: str = Field(..., description="Target pest species")
+    accumulated_gdd: float = Field(..., ge=0.0, description="Cumulative heat units GDD")
+    threshold_gdd: float = Field(..., ge=0.0, description="Emergence threshold GDD")
+    pest_risk_high: bool = Field(..., description="True if GDD >= threshold")
+    model_version: str = Field(default="Thermal-GDD-v1.0", description="Scientific model version")
+    provenance: str = Field(default="Member 1 Thermal GDD + Member 2 Engine", description="Scientific model provenance")
+    sowing_date: Optional[str] = Field(default=None, description="Registered sowing date YYYY-MM-DD")
+    weather_source: Optional[str] = Field(default=None, description="Weather data ingestion source")
+    calculation_period_days: Optional[int] = Field(default=None, description="Calculation period in days")
+
+class MarketResponse(BaseModel):
+    plot_id: str = Field(..., description="Target plot ID")
+    crop: str = Field(..., description="Crop type")
+    commodity: str = Field(..., description="Commodity name")
+    current_price: float = Field(..., ge=0.0, description="Current mandi modal price in INR")
+    currency: str = Field(default="INR", description="Currency code")
+    unit: str = Field(default="quintal", description="Price measurement unit")
+    moving_average: float = Field(..., ge=0.0, description="7-day moving average in INR")
+    momentum: float = Field(..., description="Percentage difference from moving average")
+    trend: str = Field(..., description="UP (FAVORABLE), DOWN (UNFAVORABLE), or STABLE (NEUTRAL)")
+    source: str = Field(..., description="Market data source name")
+    fetched_at: str = Field(..., description="ISO timestamp when market data was retrieved")
+    data_status: str = Field(..., description="LIVE, CACHED, or FALLBACK")
+
+class ScanResponse(BaseModel):
+    observation: str = Field(..., description="Primary visual observation summary")
+    defect_type: str = Field(..., description="Identified defect category")
+    severity: str = Field(..., description="NOMINAL, LOW, MODERATE, or HIGH")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence score")
+    affected_area_pct: float = Field(..., ge=0.0, le=100.0, description="Estimated percentage surface affected")
+    analysis_method: str = Field(..., description="Feature analysis method")
+    observations: List[str] = Field(default_factory=list, description="Detailed list of visual observations")
+    possible_issue: str = Field(..., description="Probable agronomic issue identified")
+    needs_field_scouting: bool = Field(..., description="Whether manual field scouting is recommended")
+    recommendation_note: str = Field(..., description="Safety policy isolation statement")
+

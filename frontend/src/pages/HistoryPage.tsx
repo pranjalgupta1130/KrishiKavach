@@ -11,17 +11,27 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useFieldContext } from '../contexts/FieldContext';
-import { useDecisionHistory } from '../hooks/useDecision';
+import { useDecisionHistory, useSeedDecisionHistory } from '../hooks/useDecision';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ExplainabilityDrawer } from '../components/ExplainabilityDrawer';
 import { DecisionHistoryItem } from '../types/api';
 
 export const HistoryPage: React.FC = () => {
   const { activePlotId, activePlot } = useFieldContext();
-  const { data: history, isLoading, isError, error } = useDecisionHistory(activePlotId);
+  const { data: history, isLoading, isError, error, refetch } = useDecisionHistory(activePlotId);
+  const seedMutation = useSeedDecisionHistory();
   const { t } = useLanguage();
 
   const [selectedExplainabilityId, setSelectedExplainabilityId] = useState<string | null>(null);
+
+  const handleSeedHistory = () => {
+    if (!activePlotId) return;
+    seedMutation.mutate(activePlotId, {
+      onSuccess: () => {
+        refetch();
+      }
+    });
+  };
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
@@ -40,9 +50,19 @@ export const HistoryPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-50 border border-purple-200 text-purple-950 text-xs font-bold shrink-0">
-          <Sparkles className="w-4 h-4 text-purple-700" />
-          <span>SQLite Persisted Audit</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSeedHistory}
+            disabled={seedMutation.isPending}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 disabled:bg-purple-300 text-white text-xs font-bold transition-colors cursor-pointer"
+          >
+            {seedMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4" />
+            )}
+            <span>Seed Demo History</span>
+          </button>
         </div>
       </div>
 
@@ -64,12 +84,20 @@ export const HistoryPage: React.FC = () => {
 
       {/* Empty State */}
       {!isLoading && !isError && (!history || history.length === 0) && (
-        <div className="p-8 text-center bg-white border border-slate-200 rounded-2xl space-y-2">
+        <div className="p-8 text-center bg-white border border-slate-200 rounded-2xl space-y-3">
           <HistoryIcon className="w-10 h-10 text-slate-400 mx-auto" />
           <h3 className="text-sm font-bold text-slate-900">No Historical Decisions Recorded Yet</h3>
-          <p className="text-xs text-slate-600">
-            Decisions generated on the dashboard are automatically persisted to the plot's decision history.
+          <p className="text-xs text-slate-600 max-w-md mx-auto">
+            Decisions generated on the dashboard are automatically persisted. Click below to populate demo historical benchmarks for testing.
           </p>
+          <button
+            onClick={handleSeedHistory}
+            disabled={seedMutation.isPending}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Seed Demo Historical Scenarios</span>
+          </button>
         </div>
       )}
 

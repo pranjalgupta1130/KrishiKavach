@@ -3,7 +3,10 @@ import {
   DecisionCard,
   SimulationRequest,
   SimulationResponse,
-  ExplainabilityDetails
+  ExplainabilityDetails,
+  CropHealthResponse,
+  MarketResponse,
+  ScanResponse
 } from '../types/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -19,12 +22,17 @@ class ApiError extends Error {
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   try {
+    const isFormData = options?.body instanceof FormData;
+    const headers: Record<string, string> = {
+      ...options?.headers as Record<string, string>,
+    };
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -89,3 +97,31 @@ export async function getExplainability(decisionId: string): Promise<Explainabil
 export async function getDecisionHistory(plotId: string): Promise<import('../types/api').DecisionHistoryItem[]> {
   return request<import('../types/api').DecisionHistoryItem[]>(`/api/v1/decision/history/${encodeURIComponent(plotId)}`);
 }
+
+// 8. Fetch Crop Health Details
+export async function getCropHealth(plotId: string): Promise<CropHealthResponse> {
+  return request<CropHealthResponse>(`/api/v1/crop-health/${encodeURIComponent(plotId)}`);
+}
+
+// 9. Fetch Market Indicators
+export async function getMarketData(plotId: string): Promise<MarketResponse> {
+  return request<MarketResponse>(`/api/v1/market/${encodeURIComponent(plotId)}`);
+}
+
+// 10. Perform Scan Crop Analysis
+export async function scanCropImage(file: File): Promise<ScanResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request<ScanResponse>('/api/v1/scan', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+// 11. Seed Demo Decision History (Explicit Operation)
+export async function seedDecisionHistory(plotId: string): Promise<import('../types/api').DecisionHistoryItem[]> {
+  return request<import('../types/api').DecisionHistoryItem[]>(`/api/v1/decision/seed-history/${encodeURIComponent(plotId)}`, {
+    method: 'POST'
+  });
+}
+

@@ -127,6 +127,9 @@ def arbitrate_daily_plan(
     rain_12h_limit = settings.RAIN_WASH_OFF_MM_12H
     pest_display_name = pest_state.pest_name.replace("_", " ").title()
 
+    env_wind_blocked = False
+    env_rain_blocked = False
+
     if pest_triggered:
         if wind_speed > wind_limit:
             # Conflict Detected: Pest threshold crossed, but wind speed > limit!
@@ -153,13 +156,13 @@ def arbitrate_daily_plan(
                 decision_impact="FINAL_PROHIBITION",
                 why_not="Chemical spraying rejected because wind speed exceeds the safe threshold limit."
             ))
-        elif rain_prob_6h > rain_prob_limit or rain_12h >= rain_12h_limit:
-            # Conflict Detected: Pest threshold crossed, but rain probability/rain in 12h will wash off spray!
+        elif rain_12h >= rain_12h_limit or rain_prob_6h >= rain_prob_limit:
+            # Conflict Detected: Pest threshold crossed, but imminent rain forecast will wash off spray!
             spray_state = "RAIN_BLOCKED"
             conflicts_detected.append("PEST_RAIN_WASHOFF_CONFLICT")
             reject_reason = (
                 f"{pest_display_name} emergence threshold reached ({pest_state.accumulated_gdd:.0f} GDD), "
-                f"but imminent rain forecast (probability {rain_prob_6h:.0f}% in 6h / {rain_12h:.1f}mm in 12h) "
+                f"but imminent rain forecast (12h: {rain_12h:.1f}mm, 6h prob: {rain_prob_6h:.0f}%) "
                 f"will wash off foliar treatments, wasting chemical investment."
             )
             rationales.append(reject_reason)
@@ -173,7 +176,7 @@ def arbitrate_daily_plan(
                 rule_name="Foliar Spray Rain Wash-Off Block",
                 priority=90,
                 triggered=True,
-                condition_evaluated=f"rain_prob_6h ({rain_prob_6h:.0f}%) > limit ({rain_prob_limit:.0f}%) OR rain_12h ({rain_12h:.1f}mm) >= limit ({rain_12h_limit:.1f}mm)",
+                condition_evaluated=f"rain_12h ({rain_12h:.1f}mm) >= limit ({rain_12h_limit:.1f}mm) OR rain_prob_6h ({rain_prob_6h:.0f}%) >= limit ({rain_prob_limit:.0f}%)",
                 effect="Blocked foliar spray due to rain wash-off risk.",
                 decision_impact="FINAL_PROHIBITION",
                 why_not="Foliar spraying rejected because imminent rain will cause wash-off."
@@ -195,20 +198,81 @@ def arbitrate_daily_plan(
                 decision_impact="FINAL_ACTION"
             ))
     else:
+        # Tier 2 Environmental Safety Constraints (when pest GDD < threshold)
         spray_state = "NOMINAL"
-        rationales.append(
-            f"Pest emergence degree-days ({pest_state.accumulated_gdd:.0f} GDD) remain below intervention threshold ({pest_state.gdd_threshold:.0f} GDD). "
-            f"Routine field monitoring recommended."
-        )
-        rule_traces.append(RuleTrace(
-            rule_id="RULE_PEST_NO_RISK",
-            rule_name="Pest Threshold Nominal",
-            priority=30,
-            triggered=False,
-            condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) < threshold ({pest_state.gdd_threshold:.0f})",
-            effect="No chemical spray required.",
-            decision_impact="NOMINAL"
-        ))
+        if wind_speed > wind_limit:
+            env_wind_blocked = True
+            reject_reason = (
+                f"Pest emergence GDD ({pest_state.accumulated_gdd:.0f}) is below threshold ({pest_state.gdd_threshold:.0f}), "
+                f"but sustained wind speed ({wind_speed:.1f} km/h) exceeds safe limit ({wind_limit:.1f} km/h). "
+                f"Foliar chemical applications prohibited due to severe wind drift risk."
+            )
+            rationales.append(reject_reason)
+            rejected_actions.append(RejectedAction(
+                candidate_action="CHEMICAL_PESTICIDE_SPRAY",
+                blocked_by_rule_id="RULE_ENV_WIND_SAFETY",
+                reason=reject_reason
+            ))
+            rule_traces.append(RuleTrace(
+                rule_id="RULE_ENV_WIND_SAFETY",
+                rule_name="Environmental Wind Safety Constraint",
+                priority=50,
+                triggered=True,
+                condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) < threshold ({pest_state.gdd_threshold:.0f}) AND wind ({wind_speed:.1f} km/h) > limit ({wind_limit:.1f} km/h)",
+                effect="Prohibited foliar/chemical spraying due to severe wind drift risk.",
+                decision_impact="PROHIBITION",
+                why_not="Chemical spraying rejected due to high wind drift risk."
+            ))
+
+        if rain_36h >= settings.RAIN_IRRIGATION_SUPPRESS_MM_36H or rain_12h >= rain_12h_limit or rain_prob_6h >= rain_prob_limit:
+            env_rain_blocked = True
+            reject_reason = (
+                f"Pest emergence GDD ({pest_state.accumulated_gdd:.0f}) is below threshold ({pest_state.gdd_threshold:.0f}), "
+                f"but precipitation forecast (36h: {rain_36h:.1f}mm, 12h: {rain_12h:.1f}mm, 6h prob: {rain_prob_6h:.0f}%) "
+                f"violates safe spraying limits. Foliar applications prohibited due to wash-off risk."
+            )
+            rationales.append(reject_reason)
+            rejected_actions.append(RejectedAction(
+                candidate_action="FOLIAR_CHEMICAL_SPRAY",
+                blocked_by_rule_id="RULE_ENV_RAIN_SAFETY",
+                reason=reject_reason
+            ))
+            rule_traces.append(RuleTrace(
+                rule_id="RULE_ENV_RAIN_SAFETY",
+                rule_name="Environmental Rain Safety Constraint",
+                priority=50,
+                triggered=True,
+                condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) < threshold ({pest_state.gdd_threshold:.0f}) AND (rain_36h ({rain_36h:.1f}mm) >= 25.0 OR rain_12h ({rain_12h:.1f}mm) >= {rain_12h_limit:.1f} OR rain_prob_6h ({rain_prob_6h:.0f}%) >= {rain_prob_limit:.0f}%)",
+                effect="Prohibited foliar/chemical spraying due to rain wash-off risk.",
+                decision_impact="PROHIBITION",
+                why_not="Foliar spraying rejected due to rain wash-off risk."
+            ))
+
+        if not env_wind_blocked and not env_rain_blocked:
+            rationales.append(
+                f"Pest emergence degree-days ({pest_state.accumulated_gdd:.0f} GDD) remain below intervention threshold ({pest_state.gdd_threshold:.0f} GDD) "
+                f"under safe weather conditions."
+            )
+            if hydro_state == "NOMINAL":
+                rule_traces.append(RuleTrace(
+                    rule_id="RULE_NOMINAL_SAFE",
+                    rule_name="Nominal Safe Field Operations",
+                    priority=30,
+                    triggered=True,
+                    condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) < threshold ({pest_state.gdd_threshold:.0f}) AND depletion ({soil_state.depletion_mm:.1f}mm) < RAW ({soil_state.raw_mm:.1f}mm) AND weather safe",
+                    effect="Standard field operations permitted.",
+                    decision_impact="NOMINAL"
+                ))
+            else:
+                rule_traces.append(RuleTrace(
+                    rule_id="RULE_PEST_NO_RISK",
+                    rule_name="Pest Threshold Nominal",
+                    priority=30,
+                    triggered=False,
+                    condition_evaluated=f"pest_gdd ({pest_state.accumulated_gdd:.0f}) < threshold ({pest_state.gdd_threshold:.0f})",
+                    effect="No chemical spray required.",
+                    decision_impact="NOMINAL"
+                ))
 
     # -------------------------------------------------------------------------
     # 3. Market Signal Support (Secondary - NEVER OVERRIDES AGRONOMIC RULES)
@@ -229,54 +293,75 @@ def arbitrate_daily_plan(
         ))
 
     # -------------------------------------------------------------------------
-    # 4. Synthesize ONE Primary Action & ONE Critical Prohibition
+    # 4. Synthesize Primary Action & Critical Prohibition
     # -------------------------------------------------------------------------
     # Critical Prohibition Synthesis
-    if hydro_state == "PROHIBITED" and spray_state in ["WIND_BLOCKED", "RAIN_BLOCKED"]:
-        critical_prohibition_str = "DO NOT IRRIGATE OR APPLY CHEMICAL SPRAYS TODAY"
-    elif hydro_state == "PROHIBITED":
-        critical_prohibition_str = "DO NOT IRRIGATE TODAY"
-    elif spray_state == "WIND_BLOCKED":
-        critical_prohibition_str = "DO NOT SPRAY PESTICIDES OR CHEMICALS"
-    elif spray_state == "RAIN_BLOCKED":
-        critical_prohibition_str = "DO NOT SPRAY FOLIAR CHEMICALS"
+    if pest_triggered:
+        if hydro_state == "PROHIBITED" and spray_state in ["WIND_BLOCKED", "RAIN_BLOCKED"]:
+            critical_prohibition_str = "DO NOT IRRIGATE OR APPLY CHEMICAL SPRAYS TODAY"
+        elif hydro_state == "PROHIBITED":
+            critical_prohibition_str = "DO NOT IRRIGATE TODAY"
+        elif spray_state == "WIND_BLOCKED":
+            critical_prohibition_str = "DO NOT SPRAY PESTICIDES OR CHEMICALS"
+        elif spray_state == "RAIN_BLOCKED":
+            critical_prohibition_str = "DO NOT SPRAY FOLIAR CHEMICALS"
+        else:
+            critical_prohibition_str = "NO CRITICAL PROHIBITIONS TODAY — Standard field operations permitted"
     else:
-        critical_prohibition_str = "NO CRITICAL PROHIBITIONS TODAY — Standard field operations permitted"
+        prohibitions_list: List[str] = []
+        if hydro_state == "PROHIBITED":
+            prohibitions_list.append("DO NOT IRRIGATE TODAY")
+
+        if env_wind_blocked and env_rain_blocked:
+            prohibitions_list.append("DO NOT SPRAY CHEMICALS (HIGH WIND DRIFT & RAIN WASH-OFF RISK)")
+        elif env_wind_blocked:
+            prohibitions_list.append("DO NOT SPRAY CHEMICALS (HIGH WIND DRIFT RISK)")
+        elif env_rain_blocked:
+            prohibitions_list.append("DO NOT SPRAY FOLIAR CHEMICALS (RAIN WASH-OFF RISK)")
+
+        if len(prohibitions_list) > 0:
+            critical_prohibition_str = "; ".join(prohibitions_list)
+        else:
+            critical_prohibition_str = "NO CRITICAL PROHIBITIONS TODAY — Standard field operations permitted"
 
     # Primary Action Synthesis
-    if hydro_state == "PROHIBITED" and spray_state == "WIND_BLOCKED":
-        primary_action_str = "Clear field drainage trenches immediately and deploy biological pheromone traps"
-    elif hydro_state == "PROHIBITED" and spray_state == "RAIN_BLOCKED":
-        primary_action_str = "Clear field drainage trenches immediately; postpone chemical spraying until rain clears"
-    elif hydro_state == "PROHIBITED" and spray_state == "APPROVED":
-        primary_action_str = "Clear field drainage trenches immediately; apply targeted bio-pesticide spray with PPE"
-    elif hydro_state == "PROHIBITED":
-        primary_action_str = "Clear field drainage trenches immediately"
-    elif hydro_state == "APPROVED" and spray_state == "WIND_BLOCKED":
-        primary_action_str = "Apply controlled drip/tubewell irrigation; deploy biological pheromone traps for pest monitoring"
-    elif hydro_state == "APPROVED" and spray_state == "RAIN_BLOCKED":
-        primary_action_str = "Apply controlled drip/tubewell irrigation; postpone chemical spraying until rain clears"
-    elif hydro_state == "APPROVED" and spray_state == "APPROVED":
-        primary_action_str = "Apply controlled irrigation; spraying is not blocked by current wind conditions. Follow approved local pest-management guidance."
+    if hydro_state == "PROHIBITED":
+        if spray_state == "WIND_BLOCKED" or env_wind_blocked:
+            primary_action_str = "Clear field drainage trenches immediately and deploy biological pheromone traps"
+        elif spray_state == "RAIN_BLOCKED" or env_rain_blocked:
+            primary_action_str = "Clear field drainage trenches immediately; postpone chemical spraying until rain clears"
+        elif spray_state == "APPROVED":
+            primary_action_str = "Clear field drainage trenches immediately; apply targeted bio-pesticide spray with PPE"
+        else:
+            primary_action_str = "Clear field drainage trenches immediately"
     elif hydro_state == "APPROVED":
-        primary_action_str = "Apply controlled irrigation (tubewell/drip)"
-    elif spray_state == "WIND_BLOCKED":
-        primary_action_str = "Deploy pheromone traps and monitor field boundaries manually"
-    elif spray_state == "RAIN_BLOCKED":
-        primary_action_str = "Postpone chemical spraying until rain clears"
-    elif spray_state == "APPROVED":
-        primary_action_str = "Apply recommended bio-pesticide or targeted chemical spray with PPE"
+        if spray_state == "WIND_BLOCKED" or env_wind_blocked:
+            primary_action_str = "Apply controlled drip/tubewell irrigation; deploy biological pheromone traps for pest monitoring"
+        elif spray_state == "RAIN_BLOCKED" or env_rain_blocked:
+            primary_action_str = "Apply controlled drip/tubewell irrigation; postpone chemical spraying until rain clears"
+        elif spray_state == "APPROVED":
+            primary_action_str = "Apply controlled irrigation; spraying is not blocked by current wind conditions. Follow approved local pest-management guidance."
+        else:
+            primary_action_str = "Apply controlled irrigation (tubewell/drip)"
     else:
-        primary_action_str = "Perform routine field inspection and soil maintenance"
-        rule_traces.append(RuleTrace(
-            rule_id="RULE_ROUTINE_01",
-            rule_name="Routine Field Operation Fallback",
-            priority=10,
-            triggered=True,
-            condition_evaluated="hydro_state == NOMINAL AND spray_state == NOMINAL",
-            effect="Perform routine field inspection.",
-            decision_impact="FINAL_ACTION"
-        ))
+        if spray_state == "WIND_BLOCKED" or env_wind_blocked:
+            primary_action_str = "Deploy pheromone traps and monitor field boundaries manually"
+        elif spray_state == "RAIN_BLOCKED" or env_rain_blocked:
+            primary_action_str = "Postpone chemical spraying until rain clears"
+        elif spray_state == "APPROVED":
+            primary_action_str = "Apply recommended bio-pesticide or targeted chemical spray with PPE"
+        else:
+            primary_action_str = "Perform routine field inspection and soil maintenance"
+            if not any(t.rule_id == "RULE_NOMINAL_SAFE" and t.triggered for t in rule_traces):
+                rule_traces.append(RuleTrace(
+                    rule_id="RULE_ROUTINE_01",
+                    rule_name="Routine Field Operation Fallback",
+                    priority=10,
+                    triggered=True,
+                    condition_evaluated="hydro_state == NOMINAL AND spray_state == NOMINAL AND weather safe",
+                    effect="Perform routine field inspection.",
+                    decision_impact="FINAL_ACTION"
+                ))
 
     scientific_rationale_str = " ".join(rationales)
 

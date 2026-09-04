@@ -143,18 +143,32 @@ def get_daily_decision(plot_id: str, db: Session = Depends(get_db)):
     decision_card.translations = translations
 
     try:
-        decision_rec = DBDecisionRecord(
-            decision_id=decision_card.decision_id,
-            plot_id=plot_id,
-            date=date_str,
-            primary_action=decision_card.primary_action,
-            critical_prohibition=decision_card.critical_prohibition,
-            scientific_rationale=decision_card.scientific_rationale,
-            confidence_indicator=decision_card.confidence_indicator,
-            explainability_id=decision_card.explainability_id,
-            explainability_json=explainability_details.model_dump_json()
-        )
-        db.add(decision_rec)
+        existing_today = db.query(DBDecisionRecord).filter(
+            DBDecisionRecord.plot_id == plot_id,
+            DBDecisionRecord.date == date_str
+        ).first()
+
+        if existing_today:
+            existing_today.primary_action = decision_card.primary_action
+            existing_today.critical_prohibition = decision_card.critical_prohibition
+            existing_today.scientific_rationale = decision_card.scientific_rationale
+            existing_today.confidence_indicator = decision_card.confidence_indicator
+            existing_today.explainability_id = decision_card.explainability_id
+            existing_today.explainability_json = explainability_details.model_dump_json()
+            decision_card.decision_id = existing_today.decision_id
+        else:
+            decision_rec = DBDecisionRecord(
+                decision_id=decision_card.decision_id,
+                plot_id=plot_id,
+                date=date_str,
+                primary_action=decision_card.primary_action,
+                critical_prohibition=decision_card.critical_prohibition,
+                scientific_rationale=decision_card.scientific_rationale,
+                confidence_indicator=decision_card.confidence_indicator,
+                explainability_id=decision_card.explainability_id,
+                explainability_json=explainability_details.model_dump_json()
+            )
+            db.add(decision_rec)
         db.commit()
     except Exception:
         db.rollback()
@@ -270,12 +284,18 @@ def simulate_decision(req: SimulationRequest, db: Session = Depends(get_db)):
                 impact = "Spray prohibition removed" if not sim_trig else "Spray prohibition enforced due to high wind"
             elif r_id == "RULE_PEST_RAIN_01":
                 impact = "Spray prohibition removed" if not sim_trig else "Spray prohibition enforced due to rain wash-off risk"
+            elif r_id == "RULE_ENV_WIND_SAFETY":
+                impact = "Environmental wind safety constraint cleared" if not sim_trig else "Environmental wind safety constraint enforced due to high wind"
+            elif r_id == "RULE_ENV_RAIN_SAFETY":
+                impact = "Environmental rain safety constraint cleared" if not sim_trig else "Environmental rain safety constraint enforced due to rain forecast"
             elif r_id == "RULE_HYDRO_01":
                 impact = "Irrigation suppression removed" if not sim_trig else "Irrigation suppressed due to rain forecast"
             elif r_id == "RULE_HYDRO_02":
                 impact = "Irrigation approved" if sim_trig else "Irrigation approval revoked"
             elif r_id == "RULE_PEST_SPRAY_OK":
                 impact = "Pesticide spray approved" if sim_trig else "Pesticide spray approval revoked"
+            elif r_id == "RULE_NOMINAL_SAFE":
+                impact = "Nominal safe operation state updated"
             else:
                 impact = f"Rule {r_id} state changed from {prev_trig} to {sim_trig}"
 
@@ -299,6 +319,23 @@ def simulate_decision(req: SimulationRequest, db: Session = Depends(get_db)):
             flip_reason = (
                 f"Spraying restriction was removed because simulated wind speed ({wind_val:.1f} km/h) "
                 f"fell within the configured spray-safe limit ({settings.WIND_SAFE_LIMIT_KMH:.1f} km/h)."
+            )
+        elif any(rc.rule_id == "RULE_ENV_WIND_SAFETY" for rc in rule_changes):
+            wind_val = sim_weather.wind_speed_kmh
+            if wind_val <= settings.WIND_SAFE_LIMIT_KMH:
+                flip_reason = (
+                    f"Environmental wind safety constraint was cleared because simulated wind speed ({wind_val:.1f} km/h) "
+                    f"fell within the configured spray-safe limit ({settings.WIND_SAFE_LIMIT_KMH:.1f} km/h)."
+                )
+            else:
+                flip_reason = (
+                    f"Environmental wind safety constraint enforced because simulated wind speed ({wind_val:.1f} km/h) "
+                    f"exceeds the safe spraying threshold ({settings.WIND_SAFE_LIMIT_KMH:.1f} km/h)."
+                )
+        elif any(rc.rule_id == "RULE_ENV_RAIN_SAFETY" for rc in rule_changes):
+            flip_reason = (
+                f"Environmental rain safety constraint was updated because simulated rainfall "
+                f"changed relative to safe spraying limits."
             )
         elif any(rc.rule_id == "RULE_HYDRO_01" for rc in rule_changes):
             rain_val = sim_weather.rain_next_36h_mm
@@ -391,3 +428,126 @@ def get_decision_history(
         ))
 
     return history_items
+
+
+@router.post("/seed-history/{plot_id}", response_model=List[DecisionHistoryItem], status_code=status.HTTP_201_CREATED)
+def seed_decision_history(plot_id: str, db: Session = Depends(get_db)):
+    """
+    Explicit demo/test operation to seed 3 distinct historical decision records
+    for past dates (Day -3, Day -2, Day -1) with varying weather and conflict states.
+    All seeded records are explicitly marked with DEMO/SEEDED metadata per safety policy.
+    """
+    from datetime import timedelta
+
+    db_plot = db.query(DBPlot).filter(DBPlot.plot_id == plot_id).first()
+    if not db_plot:
+        if plot_id == "tukaram_beed_01":
+            tukaram = get_tukaram_plot_profile()
+            db_plot = DBPlot(
+                plot_id=tukaram.plot_id,
+                farmer_name=tukaram.farmer_name,
+                district=tukaram.location.district,
+                latitude=tukaram.location.latitude,
+                longitude=tukaram.location.longitude,
+                crop_type=tukaram.crop_type,
+                sowing_date=tukaram.sowing_date,
+                soil_type=tukaram.soil_type,
+                plot_area_ha=tukaram.plot_area_ha
+            )
+            db.add(db_plot)
+            db.commit()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Plot '{plot_id}' not found."
+            )
+
+    today = datetime.now(timezone.utc).date()
+
+    # 3 Historical Scenarios: Day -3 (Clear/Spray OK), Day -2 (High Wind Block), Day -1 (Heavy Rain Block)
+    scenarios = [
+        {
+            "days_ago": 3,
+            "wind_speed_kmh": 6.0,
+            "rain_next_36h_mm": 0.0,
+            "rain_prob_next_6h": 5.0,
+            "depletion_mm": 45.0,
+            "desc": "Clear skies, low wind, moisture stressed -> Tubewell irrigation & spray approved"
+        },
+        {
+            "days_ago": 2,
+            "wind_speed_kmh": 19.5,
+            "rain_next_36h_mm": 2.0,
+            "rain_prob_next_6h": 10.0,
+            "depletion_mm": 45.0,
+            "desc": "High wind (19.5 km/h > 15 km/h limit) -> Spray drift prohibition enforced"
+        },
+        {
+            "days_ago": 1,
+            "wind_speed_kmh": 8.0,
+            "rain_next_36h_mm": 32.0,
+            "rain_prob_next_6h": 80.0,
+            "depletion_mm": 45.0,
+            "desc": "Heavy rain forecast (32 mm >= 25 mm limit) -> Irrigation prohibited"
+        }
+    ]
+
+    base_market = fetch_market_state(db_plot.crop_type, f"{db_plot.district} APMC")
+    seeded_records: List[DBDecisionRecord] = []
+
+    for sc in scenarios:
+        sc_date_str = (today - timedelta(days=sc["days_ago"])).strftime("%Y-%m-%d")
+
+        # Create mock weather fixture for historical scenario
+        sc_weather = WeatherForecast(
+            date=sc_date_str,
+            temp_max=32.0,
+            temp_min=22.0,
+            temp_mean=27.0,
+            rain_next_12h_mm=0.0,
+            rain_next_24h_mm=0.0,
+            rain_next_36h_mm=sc["rain_next_36h_mm"],
+            rain_prob_next_6h=sc["rain_prob_next_6h"],
+            wind_speed_kmh=sc["wind_speed_kmh"],
+            wind_gust_kmh=sc["wind_speed_kmh"] + 5.0,
+            et0_mm=4.5,
+            humidity_percent=65.0,
+            source="demo_historical_scenario"
+        )
+
+        base_soil, base_pest = compute_agronomic_states(db_plot, sc_weather)
+        sc_card, sc_exp = arbitrate_daily_plan(plot_id, sc_date_str, base_soil, base_pest, sc_weather, base_market)
+        sc_card.confidence_indicator = "DEMO/SEEDED: Historical Benchmark"
+
+        # Check existing record for that historical date
+        existing_rec = db.query(DBDecisionRecord).filter(
+            DBDecisionRecord.plot_id == plot_id,
+            DBDecisionRecord.date == sc_date_str
+        ).first()
+
+        if existing_rec:
+            existing_rec.primary_action = sc_card.primary_action
+            existing_rec.critical_prohibition = sc_card.critical_prohibition
+            existing_rec.scientific_rationale = sc_card.scientific_rationale
+            existing_rec.confidence_indicator = sc_card.confidence_indicator
+            existing_rec.explainability_id = sc_card.explainability_id
+            existing_rec.explainability_json = sc_exp.model_dump_json()
+            seeded_records.append(existing_rec)
+        else:
+            new_rec = DBDecisionRecord(
+                decision_id=sc_card.decision_id,
+                plot_id=plot_id,
+                date=sc_date_str,
+                primary_action=sc_card.primary_action,
+                critical_prohibition=sc_card.critical_prohibition,
+                scientific_rationale=sc_card.scientific_rationale,
+                confidence_indicator=sc_card.confidence_indicator,
+                explainability_id=sc_card.explainability_id,
+                explainability_json=sc_exp.model_dump_json()
+            )
+            db.add(new_rec)
+            seeded_records.append(new_rec)
+
+    db.commit()
+
+    return get_decision_history(plot_id=plot_id, limit=20, db=db)

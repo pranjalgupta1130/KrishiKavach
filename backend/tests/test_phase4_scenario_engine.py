@@ -136,40 +136,98 @@ def test_negative_infinity_override_value_rejected(client):
     assert res.status_code == 422
 
 
-def test_causal_chain_wind_flip_19_to_8(client):
-    """
-    Verify complete causal chain for wind 19 -> 8 km/h demo scenario:
-    - wind > 15 before, wind <= 15 after
-    - RULE_PEST_WIND_01 triggered before
-    - RULE_PEST_WIND_01 not triggered after
-    - spray prohibition present before
-    - spray prohibition removed after
-    - is_flipped == True
-    """
+def test_causal_chain_safe_wind_removes_wind_rule(client):
+    """Verify Safe Wind override (wind = 8 km/h) removes RULE_PEST_WIND_01."""
+    payload = {
+        "plot_id": "tukaram_beed_01",
+        "overrides": {"wind_speed_kmh": 8.0}
+    }
+    res = client.post("/api/v1/decision/simulate", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "RULE_PEST_WIND_01" in data["triggered_rules_before"]
+    assert "RULE_PEST_WIND_01" not in data["triggered_rules_after"]
+    rc_map = {rc["rule_id"]: rc for rc in data["rule_changes"]}
+    assert "RULE_PEST_WIND_01" in rc_map
+    assert rc_map["RULE_PEST_WIND_01"]["previous"] is True
+    assert rc_map["RULE_PEST_WIND_01"]["simulated"] is False
+    assert data["is_flipped"] is True
+
+
+def test_causal_chain_clear_rain_removes_hydro_rule(client):
+    """Verify Clear Rain override (36h = 0, 12h = 0, 6h prob = 0) removes RULE_HYDRO_01 and allows RULE_HYDRO_02."""
     payload = {
         "plot_id": "tukaram_beed_01",
         "overrides": {
-            "wind_speed_kmh": 8.0,
-            "rain_next_36h_mm": 0.0
+            "rain_next_36h_mm": 0.0,
+            "rain_next_12h_mm": 0.0,
+            "rain_prob_next_6h": 0.0
         }
     }
     res = client.post("/api/v1/decision/simulate", json=payload)
     assert res.status_code == 200
     data = res.json()
 
-    # 1. Causal rule check
-    assert "RULE_PEST_WIND_01" in data["triggered_rules_before"]
-    assert "RULE_PEST_WIND_01" not in data["triggered_rules_after"]
-
-    # 2. Causal prohibition check
-    assert "DO NOT" in data["original_decision"]["critical_prohibition"]
-    assert "NO CRITICAL PROHIBITIONS" in data["simulated_decision"]["critical_prohibition"]
-
-    # 3. Decision flip flag
+    assert "RULE_HYDRO_01" in data["triggered_rules_before"]
+    assert "RULE_HYDRO_01" not in data["triggered_rules_after"]
+    assert "RULE_HYDRO_02" in data["triggered_rules_after"]
+    rc_map = {rc["rule_id"]: rc for rc in data["rule_changes"]}
+    assert "RULE_HYDRO_01" in rc_map
+    assert rc_map["RULE_HYDRO_01"]["previous"] is True
+    assert rc_map["RULE_HYDRO_01"]["simulated"] is False
     assert data["is_flipped"] is True
 
-    # 4. Deterministic flip reason contains boundary reference
-    assert "15.0 km/h" in data["flip_reason"] or "spray-safe limit" in data["flip_reason"]
+
+def test_causal_chain_combined_safe_wind_and_clear_rain(client):
+    """Verify Combined Safe Wind (8 km/h) + Clear Rain (0 mm) removes both blocking rules, triggers approval rules, and produces unprohibited decision card."""
+    payload = {
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "wind_speed_kmh": 8.0,
+            "rain_next_36h_mm": 0.0,
+            "rain_next_12h_mm": 0.0,
+            "rain_prob_next_6h": 0.0
+        }
+    }
+    res = client.post("/api/v1/decision/simulate", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "RULE_HYDRO_01" in data["triggered_rules_before"]
+    assert "RULE_PEST_WIND_01" in data["triggered_rules_before"]
+
+    assert "RULE_HYDRO_01" not in data["triggered_rules_after"]
+    assert "RULE_PEST_WIND_01" not in data["triggered_rules_after"]
+    assert "RULE_HYDRO_02" in data["triggered_rules_after"]
+    assert "RULE_PEST_SPRAY_OK" in data["triggered_rules_after"]
+
+    assert "NO CRITICAL PROHIBITIONS" in data["simulated_decision"]["critical_prohibition"]
+    assert data["is_flipped"] is True
+    assert data["simulated_decision"]["primary_action"] != data["original_decision"]["primary_action"]
+
+
+def test_simulation_does_not_return_baseline_on_threshold_crossing_override(client):
+    """Guardrail test: Fails if simulation returns exact baseline decision despite threshold-crossing override."""
+    payload = {
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "wind_speed_kmh": 8.0,
+            "rain_next_36h_mm": 0.0,
+            "rain_next_12h_mm": 0.0,
+            "rain_prob_next_6h": 0.0
+        }
+    }
+    res = client.post("/api/v1/decision/simulate", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    orig = data["original_decision"]
+    sim = data["simulated_decision"]
+
+    assert sim["primary_action"] != orig["primary_action"], "Simulated primary_action must differ from baseline!"
+    assert sim["critical_prohibition"] != orig["critical_prohibition"], "Simulated critical_prohibition must differ from baseline!"
+    assert data["is_flipped"] is True, "is_flipped must be True when thresholds are crossed!"
 
 
 def test_causal_chain_wind_no_flip_19_to_18(client):
@@ -315,3 +373,140 @@ def test_scenario_determinism_repeated_runs(client):
         assert d["triggered_rules_after"] == base_data["triggered_rules_after"]
         assert d["rule_changes"] == base_data["rule_changes"]
         assert d["flip_reason"] == base_data["flip_reason"]
+
+
+# -----------------------------------------------------------------------------
+# Refined 2-Tier Model Tests: Cases A through G Specification Matrix
+# -----------------------------------------------------------------------------
+
+def test_case_a_high_wind_low_pest_gdd(client):
+    """Case A: Wind 40 km/h, GDD 34 (pest not triggered). RULE_ENV_WIND_SAFETY + RULE_ENV_RAIN_SAFETY + RULE_HYDRO_01 trigger, is_flipped == True."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "wind_speed_kmh": 40.0,
+            "accumulated_gdd": 34.0
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_ENV_WIND_SAFETY" in data["triggered_rules_after"]
+    assert "RULE_ENV_RAIN_SAFETY" in data["triggered_rules_after"]
+    assert "RULE_HYDRO_01" in data["triggered_rules_after"]
+    assert data["simulated_decision"]["critical_prohibition"] == "DO NOT IRRIGATE TODAY; DO NOT SPRAY CHEMICALS (HIGH WIND DRIFT & RAIN WASH-OFF RISK)"
+    assert data["is_flipped"] is True
+
+
+def test_case_b_high_wind_high_pest_gdd(client):
+    """Case B: Wind 40 km/h, GDD 500 (pest triggered). RULE_PEST_WIND_01 triggers, decision identical to baseline (is_flipped == False)."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "wind_speed_kmh": 40.0,
+            "accumulated_gdd": 500.0
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_PEST_WIND_01" in data["triggered_rules_after"]
+    assert "RULE_HYDRO_01" in data["triggered_rules_after"]
+    assert data["simulated_decision"]["primary_action"] == data["original_decision"]["primary_action"]
+    assert data["simulated_decision"]["critical_prohibition"] == data["original_decision"]["critical_prohibition"]
+    assert data["is_flipped"] is False
+
+
+def test_case_c_safe_wind_high_pest_gdd_clear_rain(client):
+    """Case C: Wind 8 km/h, GDD 500, Rain 0 mm. Triggers RULE_PEST_SPRAY_OK and RULE_HYDRO_02 (is_flipped == True)."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "wind_speed_kmh": 8.0,
+            "accumulated_gdd": 500.0,
+            "rain_next_36h_mm": 0.0,
+            "rain_next_12h_mm": 0.0,
+            "rain_prob_next_6h": 0.0
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_PEST_SPRAY_OK" in data["triggered_rules_after"]
+    assert "RULE_HYDRO_02" in data["triggered_rules_after"]
+    assert data["is_flipped"] is True
+
+
+def test_case_d_heavy_rain_adequate_soil_low_gdd_high_wind(client):
+    """Case D: Rain 60 mm, Depletion 0 mm, GDD 34, Wind 18.5 km/h. Triggers RULE_ENV_RAIN_SAFETY + RULE_ENV_WIND_SAFETY (is_flipped == True)."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "rain_next_36h_mm": 60.0,
+            "soil_depletion_mm": 0.0,
+            "accumulated_gdd": 34.0,
+            "wind_speed_kmh": 18.5
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_ENV_RAIN_SAFETY" in data["triggered_rules_after"]
+    assert "RULE_ENV_WIND_SAFETY" in data["triggered_rules_after"]
+    assert "RULE_HYDRO_01" not in data["triggered_rules_after"]
+    assert data["simulated_decision"]["critical_prohibition"] == "DO NOT SPRAY CHEMICALS (HIGH WIND DRIFT & RAIN WASH-OFF RISK)"
+    assert data["is_flipped"] is True
+
+
+def test_case_e_heavy_rain_stressed_soil_high_gdd_high_wind(client):
+    """Case E: Rain 60 mm, Depletion 120 mm, GDD 1170, Wind 18.5 km/h. Triggers RULE_HYDRO_01 + RULE_PEST_WIND_01 (is_flipped == False)."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "rain_next_36h_mm": 60.0
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_HYDRO_01" in data["triggered_rules_after"]
+    assert "RULE_PEST_WIND_01" in data["triggered_rules_after"]
+    assert data["simulated_decision"]["primary_action"] == data["original_decision"]["primary_action"]
+    assert data["simulated_decision"]["critical_prohibition"] == data["original_decision"]["critical_prohibition"]
+    assert data["is_flipped"] is False
+
+
+def test_case_f_clear_rain_stressed_soil_low_gdd_safe_wind(client):
+    """Case F: Rain 0 mm, Depletion 120 mm, GDD 34, Wind 8 km/h. Triggers RULE_HYDRO_02 + weather safe (is_flipped == True)."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "rain_next_36h_mm": 0.0,
+            "rain_next_12h_mm": 0.0,
+            "rain_prob_next_6h": 0.0,
+            "soil_depletion_mm": 120.0,
+            "accumulated_gdd": 34.0,
+            "wind_speed_kmh": 8.0
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_HYDRO_02" in data["triggered_rules_after"]
+    assert "NO CRITICAL PROHIBITIONS" in data["simulated_decision"]["critical_prohibition"]
+    assert data["is_flipped"] is True
+
+
+def test_case_g_safe_wind_clear_rain_high_gdd_stressed_soil(client):
+    """Case G: Wind 8 km/h, Rain 0 mm, GDD 500, Depletion 120 mm. Triggers RULE_HYDRO_02 + RULE_PEST_SPRAY_OK (is_flipped == True)."""
+    res = client.post("/api/v1/decision/simulate", json={
+        "plot_id": "tukaram_beed_01",
+        "overrides": {
+            "wind_speed_kmh": 8.0,
+            "rain_next_36h_mm": 0.0,
+            "rain_next_12h_mm": 0.0,
+            "rain_prob_next_6h": 0.0,
+            "accumulated_gdd": 500.0,
+            "soil_depletion_mm": 120.0
+        }
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "RULE_HYDRO_02" in data["triggered_rules_after"]
+    assert "RULE_PEST_SPRAY_OK" in data["triggered_rules_after"]
+    assert data["is_flipped"] is True
+

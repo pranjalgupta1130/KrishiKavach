@@ -3,29 +3,32 @@ import { useNavigate } from 'react-router-dom';
 import {
   Camera,
   Upload,
-  RefreshCw,
   Trash2,
   Sparkles,
   ShieldAlert,
-  CheckCircle2,
   AlertTriangle,
   Loader2,
   Info,
   ArrowRight,
-  MapPin
+  MapPin,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { useFieldContext } from '../contexts/FieldContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { CropScanResult } from '../types/api';
+import { useScanCropImage } from '../hooks/useDecision';
+import { ScanResponse } from '../types/api';
 
 export const ScanCropPage: React.FC = () => {
   const { activePlotId, activePlot } = useFieldContext();
   const { t } = useLanguage();
   const navigate = useNavigate();
 
+  const scanMutation = useScanCropImage();
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [scanResult, setScanResult] = useState<CropScanResult | null>(null);
+  const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -34,6 +37,7 @@ export const ScanCropPage: React.FC = () => {
   const handleImageSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onload = (event) => {
         setImageSrc(event.target?.result as string);
@@ -45,34 +49,21 @@ export const ScanCropPage: React.FC = () => {
   };
 
   const handleAnalyze = () => {
-    if (!imageSrc) return;
+    if (!selectedFile) return;
 
-    setIsAnalyzing(true);
     setError(null);
-
-    // Simulate structured safety image analysis matching crop context
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      const isCotton = activePlot?.crop_type === 'bt_cotton' || !activePlot;
-      setScanResult({
-        observations: isCotton ? [
-          'Visual leaf damage consistent with early pink bollworm larval feeding',
-          'Small entry pinholes detected on young squares/flowers',
-          'No severe foliar necrosis or fungal rust observed'
-        ] : [
-          'Scattered yellowing chlorosis on lower leaves',
-          'Mild caterpillar leaf chewing damage on outer canopy'
-        ],
-        possible_issue: isCotton ? 'Pink Bollworm (Pectinophora gossypiella) Early Activity' : 'Tobacco Caterpillar Leaf Feeding',
-        confidence: 0.88,
-        severity: 'MEDIUM',
-        needs_field_scouting: true,
-        recommendation_note: 'Visual indications only. Chemical treatments are strictly governed by daily environmental arbitration.'
-      });
-    }, 1500);
+    scanMutation.mutate(selectedFile, {
+      onSuccess: (data) => {
+        setScanResult(data);
+      },
+      onError: (err) => {
+        setError(err.message || 'Image analysis failed. Please check image format.');
+      },
+    });
   };
 
   const handleReset = () => {
+    setSelectedFile(null);
     setImageSrc(null);
     setScanResult(null);
     setError(null);
@@ -98,7 +89,7 @@ export const ScanCropPage: React.FC = () => {
 
         <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs font-bold shrink-0">
           <ShieldAlert className="w-4 h-4 text-emerald-700" />
-          <span>Safety Isolated AI</span>
+          <span>Backend Visual Engine</span>
         </div>
       </div>
 
@@ -129,7 +120,7 @@ export const ScanCropPage: React.FC = () => {
           <div className="space-y-1">
             <h3 className="text-base font-extrabold text-slate-900">Take or Upload a Crop Photo</h3>
             <p className="text-xs text-slate-600 max-w-md mx-auto">
-              Photograph affected leaves, bolls, or stems to extract visual observations for decision arbitration.
+              Photograph affected leaves, bolls, or stems for backend feature extraction and visual observations.
             </p>
           </div>
 
@@ -174,21 +165,28 @@ export const ScanCropPage: React.FC = () => {
               />
             </div>
 
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs font-bold text-red-900">
+                <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
             {!scanResult && (
               <button
                 onClick={handleAnalyze}
-                disabled={isAnalyzing}
+                disabled={scanMutation.isPending}
                 className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-400 text-white font-extrabold text-sm shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2"
               >
-                {isAnalyzing ? (
+                {scanMutation.isPending ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin text-white" />
-                    <span>Extracting Visual Observations...</span>
+                    <span>Extracting Visual Feature Metrics...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-5 h-5 text-white" />
-                    <span>Analyze Crop Image</span>
+                    <span>Analyze Crop Image (Backend API)</span>
                   </>
                 )}
               </button>
@@ -200,15 +198,17 @@ export const ScanCropPage: React.FC = () => {
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4 animate-fade-in">
               <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
                 <div className="space-y-1">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black uppercase">
-                    <AlertTriangle className="w-3 h-3 text-amber-700" />
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                    scanResult.severity === 'HIGH' ? 'bg-rose-100 text-rose-900' : (scanResult.severity === 'MODERATE' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900')
+                  }`}>
+                    {scanResult.severity === 'NOMINAL' ? <CheckCircle2 className="w-3 h-3 text-emerald-700" /> : <AlertTriangle className="w-3 h-3" />}
                     <span>Severity: {scanResult.severity}</span>
                   </span>
                   <h3 className="text-lg font-black text-slate-900 leading-tight">
                     {scanResult.possible_issue}
                   </h3>
                   <p className="text-xs text-slate-600 font-semibold">
-                    Confidence Match: {(scanResult.confidence * 100).toFixed(0)}%
+                    Match Confidence: {(scanResult.confidence * 100).toFixed(0)}% • Affected Area: {scanResult.affected_area_pct}%
                   </p>
                 </div>
 
@@ -223,7 +223,7 @@ export const ScanCropPage: React.FC = () => {
               {/* Structured Visual Observations */}
               <div className="space-y-2">
                 <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                  Extracted Visual Observations:
+                  Extracted Visual Observations ({scanResult.analysis_method}):
                 </h4>
                 <ul className="text-xs text-slate-700 space-y-1.5 list-disc list-inside font-medium bg-slate-50 p-3 rounded-xl border border-slate-200">
                   {scanResult.observations.map((obs, idx) => (

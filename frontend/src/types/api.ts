@@ -89,11 +89,46 @@ export interface DecisionHistoryItem {
   model_version?: Record<string, string>;
 }
 
-export interface CropScanResult {
+export interface CropHealthResponse {
+  plot_id: string;
+  crop: string;
+  crop_stage: string;
+  days_after_sowing: number;
+  pest: string;
+  accumulated_gdd: number;
+  threshold_gdd: number;
+  pest_risk_high: boolean;
+  model_version: string;
+  provenance: string;
+}
+
+export interface MarketResponse {
+  plot_id: string;
+  crop: string;
+  commodity: string;
+  current_price: number;
+  currency: string;
+  unit: string;
+  moving_average: number;
+  momentum: number;
+  trend: 'UP' | 'DOWN' | 'STABLE';
+  source: string;
+  fetched_at: string;
+  data_status: 'LIVE' | 'CACHED' | 'FALLBACK';
+}
+
+export interface ScanResponse {
+  observation: string;
+  defect_type: string;
+  severity: 'NOMINAL' | 'LOW' | 'MODERATE' | 'HIGH';
+  confidence: number;
+  affected_area_pct: number;
+  analysis_method: string;
   observations: string[];
   possible_issue: string;
-  confidence: number;
-  severity: 'LOW' | 'MEDIUM' | 'HIGH';
   needs_field_scouting: boolean;
   recommendation_note: string;
 }
+
+export interface CropScanResult extends ScanResponse {}
+
