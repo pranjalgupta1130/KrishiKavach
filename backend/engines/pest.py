@@ -1,9 +1,10 @@
 """
 Pest Phenology Engine (Thermal Degree Days Model)
-Interface to compute PestState for Member 1 integration.
+Interface adapter to compute PestState consuming Member 1's scientific engine.
 """
 from backend.config.settings import settings
 from backend.schemas.contracts import PestState
+from backend.engines.pest_engine import calculate_pink_bollworm_risk
 
 def calculate_gdd(temp_max: float, temp_min: float, t_base: float) -> float:
     """Calculates daily Growing Degree Days: max(((Tmax + Tmin)/2) - Tbase, 0)"""
@@ -18,25 +19,42 @@ def calculate_pest_phenology(
 ) -> PestState:
     """
     Tracks thermal accumulation against emergence limits.
-    Pink Bollworm: Tbase = 12°C, emergence threshold = 450 GDD.
-    Tobacco Caterpillar: Tbase = 10°C, emergence threshold = 380 GDD.
+    Consumes Member 1 pest_engine for Pink Bollworm (Bt-Cotton) and applies
+    calibrated thresholds for Tobacco Caterpillar (Soybean).
     """
     crop_cfg = settings.CROP_CONFIGS.get(crop_type, settings.CROP_CONFIGS["bt_cotton"])
-    pest_name = crop_cfg["target_pest"]
-    t_base = crop_cfg["pest_tbase"]
-    threshold_gdd = crop_cfg["pest_gdd_threshold"]
+    pest_name = crop_cfg.get("target_pest", "pink_bollworm")
 
-    daily_gdd = calculate_gdd(temp_max, temp_min, t_base)
-    total_gdd = accumulated_gdd + daily_gdd
+    if crop_type == "bt_cotton" or pest_name == "pink_bollworm":
+        # Delegate directly to Member 1's pest_engine
+        m1_res = calculate_pink_bollworm_risk(
+            tmax=temp_max,
+            tmin=temp_min,
+            previous_gdd=accumulated_gdd
+        )
+        return PestState(
+            crop_type=crop_type,
+            pest_name="pink_bollworm",
+            accumulated_gdd=float(m1_res["cumulative_gdd"]),
+            gdd_threshold=float(m1_res["threshold_gdd"]),
+            risk_triggered=bool(m1_res["pest_risk_high"]),
+            growth_stage="flowering_boll",
+            model_version={"pest": "Member1-PinkBollworm-GDD-v1.0"}
+        )
+    else:
+        # Soybean / Tobacco Caterpillar model using calibration settings
+        t_base = crop_cfg.get("pest_tbase", 10.0)
+        threshold_gdd = crop_cfg.get("pest_gdd_threshold", 380.0)
+        daily_gdd = calculate_gdd(temp_max, temp_min, t_base)
+        total_gdd = accumulated_gdd + daily_gdd
+        risk_triggered = total_gdd >= threshold_gdd
 
-    risk_triggered = total_gdd >= threshold_gdd
-    growth_stage = "flowering_boll" if crop_type == "bt_cotton" else "vegetative_pod"
-
-    return PestState(
-        crop_type=crop_type,
-        pest_name=pest_name,
-        accumulated_gdd=round(total_gdd, 1),
-        gdd_threshold=threshold_gdd,
-        risk_triggered=risk_triggered,
-        growth_stage=growth_stage
-    )
+        return PestState(
+            crop_type=crop_type,
+            pest_name=pest_name,
+            accumulated_gdd=round(total_gdd, 1),
+            gdd_threshold=threshold_gdd,
+            risk_triggered=risk_triggered,
+            growth_stage="vegetative_pod",
+            model_version={"pest": "Member2-TobaccoCaterpillar-GDD-v1.0"}
+        )

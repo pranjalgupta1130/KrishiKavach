@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
 class Location(BaseModel):
@@ -23,6 +23,12 @@ class SoilState(BaseModel):
     taw_mm: float = Field(..., ge=0.0, description="Total Available Water capacity in mm")
     moisture_status: str = Field(..., description="MOISTURE_STRESS or MOISTURE_ADEQUATE")
     volumetric_water_content: float = Field(..., ge=0.0, le=1.0, description="Current volumetric soil moisture fraction")
+    model_version: Dict[str, str] = Field(default_factory=lambda: {"soil": "FAO-56-v1.0"}, description="Scientific model provenance")
+
+    @property
+    def depletion_exceeded(self) -> bool:
+        """Returns True if root-zone depletion has reached or exceeded Readily Available Water (RAW)."""
+        return self.depletion_mm >= self.raw_mm
 
 class PestState(BaseModel):
     crop_type: str = Field(..., description="Crop identifier")
@@ -31,6 +37,7 @@ class PestState(BaseModel):
     gdd_threshold: float = Field(..., ge=0.0, description="Emergence threshold degree days")
     risk_triggered: bool = Field(..., description="True if GDD >= threshold")
     growth_stage: str = Field(default="flowering_boll", description="Current crop growth stage")
+    model_version: Dict[str, str] = Field(default_factory=lambda: {"pest": "Thermal-GDD-v1.0"}, description="Scientific model provenance")
 
 class WeatherForecast(BaseModel):
     date: str = Field(..., description="Forecast date YYYY-MM-DD")
@@ -66,13 +73,66 @@ class DecisionCard(BaseModel):
     explainability_id: str = Field(..., description="ID to fetch deep explainability drawer details")
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     translations: Dict[str, Dict[str, str]] = Field(default_factory=dict, description="Vernacular translations (mr, hi)")
+    model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
+
+class RejectedAction(BaseModel):
+    candidate_action: str = Field(..., description="Blocked candidate operation (e.g. TUBEVILL_IRRIGATION, CHEMICAL_PESTICIDE_SPRAY)")
+    blocked_by_rule_id: str = Field(..., description="ID of rule that blocked the action")
+    reason: str = Field(..., description="Detailed explanation of why candidate action was rejected")
 
 class RuleTrace(BaseModel):
     rule_id: str = Field(..., description="Identifier of the arbitration rule")
     rule_name: str = Field(..., description="Human-readable rule name")
+    priority: int = Field(default=50, description="Rule precedence priority (100 = highest safety constraint)")
     triggered: bool = Field(..., description="Whether rule conditions were satisfied")
     condition_evaluated: str = Field(..., description="Numeric expression evaluated")
     effect: str = Field(..., description="Action or prohibition output applied")
+    decision_impact: Optional[str] = Field(default=None, description="FINAL_PROHIBITION, FINAL_ACTION, OVERRIDDEN, or NOMINAL")
+    why_not: Optional[str] = Field(default=None, description="Structured explanation of why a candidate action was blocked")
+
+class DecisionSummary(BaseModel):
+    primary_action: str = Field(..., description="Primary action selected")
+    critical_prohibition: str = Field(..., description="Critical prohibition enforced")
+    plain_language_reason: str = Field(..., description="Plain language scientific explanation")
+    decision_status: str = Field(..., description="Data freshness / confidence indicator")
+
+class WhySection(BaseModel):
+    selected_rules: List[str] = Field(..., description="List of rule IDs that triggered and influenced the final decision")
+    triggered_conditions: List[str] = Field(..., description="Condition expressions evaluated to true")
+    priority_reason: str = Field(..., description="Explanation of priority precedence resolution")
+
+class WhyNotItem(BaseModel):
+    action: str = Field(..., description="Candidate action rejected")
+    reason: str = Field(..., description="Reason for rejection")
+    blocking_rule: str = Field(..., description="Rule ID that blocked the action")
+    priority: int = Field(default=100, description="Priority of the blocking rule")
+
+class ConflictExplanation(BaseModel):
+    conflict_id: str = Field(..., description="Conflict identifier code e.g. PEST_WIND_DRIFT_CONFLICT")
+    description: str = Field(..., description="Human-readable description of conflict")
+    winning_rule: str = Field(..., description="Rule ID that won arbitration")
+    winning_priority: int = Field(..., description="Priority of winning rule")
+    rejected_action: str = Field(..., description="Action that was blocked")
+    resolution: str = Field(..., description="Conflict resolution text")
+
+class WhatChangedItem(BaseModel):
+    field: str = Field(..., description="Field name that changed")
+    previous: Optional[Any] = Field(default=None, description="Previous value")
+    current: Optional[Any] = Field(default=None, description="Current value")
+    change: str = Field(..., description="Human-readable change description")
+
+class DecisionHistoryItem(BaseModel):
+    decision_id: str = Field(..., description="Decision ID")
+    plot_id: str = Field(..., description="Plot ID")
+    date: str = Field(..., description="Decision date YYYY-MM-DD")
+    primary_action: str = Field(..., description="Primary action directive")
+    critical_prohibition: str = Field(..., description="Critical prohibition directive")
+    scientific_rationale: str = Field(..., description="Plain language rationale")
+    confidence_indicator: str = Field(..., description="Data confidence source")
+    explainability_id: str = Field(..., description="Explainability reference ID")
+    created_at: str = Field(..., description="ISO creation timestamp")
+    rule_traces: List[RuleTrace] = Field(default_factory=list, description="Rule traces evaluated")
+    model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
 
 class ExplainabilityDetails(BaseModel):
     decision_id: str = Field(..., description="Corresponding decision ID")
@@ -84,6 +144,18 @@ class ExplainabilityDetails(BaseModel):
     market_metrics: Dict[str, float] = Field(..., description="Modal price, SMA7, Momentum %")
     confidence_indicator: str = Field(..., description="Source of data")
     rule_traces: List[RuleTrace] = Field(..., description="Auditable trace of all arbitration rules evaluated")
+    conflicts_detected: List[str] = Field(default_factory=list, description="List of detected environmental-agronomic conflicts")
+    rejected_actions: List[RejectedAction] = Field(default_factory=list, description="Structured list of candidate actions blocked by arbitration")
+    model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
+    # Phase 3 Presentation Layer Additions
+    summary: Optional[DecisionSummary] = Field(default=None, description="High-level decision summary")
+    why: Optional[WhySection] = Field(default=None, description="Why explanation section")
+    why_not: List[WhyNotItem] = Field(default_factory=list, description="Structured why-not explanation list")
+    conflicts: List[ConflictExplanation] = Field(default_factory=list, description="Structured conflict details")
+    inputs: Optional[Dict[str, Dict[str, float]]] = Field(default=None, description="Categorized input metrics")
+    model_provenance: Optional[Dict[str, str]] = Field(default=None, description="Model versions used")
+    previous_decision: Optional[Dict[str, Any]] = Field(default=None, description="Previous decision card summary if available")
+    what_changed: List[WhatChangedItem] = Field(default_factory=list, description="Deterministic change list compared to previous decision")
 
 class OverrideParams(BaseModel):
     wind_speed_kmh: Optional[float] = Field(default=None, ge=0.0, description="Override wind speed in km/h")
