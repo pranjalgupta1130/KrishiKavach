@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
 class Location(BaseModel):
@@ -90,6 +90,50 @@ class RuleTrace(BaseModel):
     decision_impact: Optional[str] = Field(default=None, description="FINAL_PROHIBITION, FINAL_ACTION, OVERRIDDEN, or NOMINAL")
     why_not: Optional[str] = Field(default=None, description="Structured explanation of why a candidate action was blocked")
 
+class DecisionSummary(BaseModel):
+    primary_action: str = Field(..., description="Primary action selected")
+    critical_prohibition: str = Field(..., description="Critical prohibition enforced")
+    plain_language_reason: str = Field(..., description="Plain language scientific explanation")
+    decision_status: str = Field(..., description="Data freshness / confidence indicator")
+
+class WhySection(BaseModel):
+    selected_rules: List[str] = Field(..., description="List of rule IDs that triggered and influenced the final decision")
+    triggered_conditions: List[str] = Field(..., description="Condition expressions evaluated to true")
+    priority_reason: str = Field(..., description="Explanation of priority precedence resolution")
+
+class WhyNotItem(BaseModel):
+    action: str = Field(..., description="Candidate action rejected")
+    reason: str = Field(..., description="Reason for rejection")
+    blocking_rule: str = Field(..., description="Rule ID that blocked the action")
+    priority: int = Field(default=100, description="Priority of the blocking rule")
+
+class ConflictExplanation(BaseModel):
+    conflict_id: str = Field(..., description="Conflict identifier code e.g. PEST_WIND_DRIFT_CONFLICT")
+    description: str = Field(..., description="Human-readable description of conflict")
+    winning_rule: str = Field(..., description="Rule ID that won arbitration")
+    winning_priority: int = Field(..., description="Priority of winning rule")
+    rejected_action: str = Field(..., description="Action that was blocked")
+    resolution: str = Field(..., description="Conflict resolution text")
+
+class WhatChangedItem(BaseModel):
+    field: str = Field(..., description="Field name that changed")
+    previous: Optional[Any] = Field(default=None, description="Previous value")
+    current: Optional[Any] = Field(default=None, description="Current value")
+    change: str = Field(..., description="Human-readable change description")
+
+class DecisionHistoryItem(BaseModel):
+    decision_id: str = Field(..., description="Decision ID")
+    plot_id: str = Field(..., description="Plot ID")
+    date: str = Field(..., description="Decision date YYYY-MM-DD")
+    primary_action: str = Field(..., description="Primary action directive")
+    critical_prohibition: str = Field(..., description="Critical prohibition directive")
+    scientific_rationale: str = Field(..., description="Plain language rationale")
+    confidence_indicator: str = Field(..., description="Data confidence source")
+    explainability_id: str = Field(..., description="Explainability reference ID")
+    created_at: str = Field(..., description="ISO creation timestamp")
+    rule_traces: List[RuleTrace] = Field(default_factory=list, description="Rule traces evaluated")
+    model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
+
 class ExplainabilityDetails(BaseModel):
     decision_id: str = Field(..., description="Corresponding decision ID")
     plot_id: str = Field(..., description="Plot identifier")
@@ -103,6 +147,15 @@ class ExplainabilityDetails(BaseModel):
     conflicts_detected: List[str] = Field(default_factory=list, description="List of detected environmental-agronomic conflicts")
     rejected_actions: List[RejectedAction] = Field(default_factory=list, description="Structured list of candidate actions blocked by arbitration")
     model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
+    # Phase 3 Presentation Layer Additions
+    summary: Optional[DecisionSummary] = Field(default=None, description="High-level decision summary")
+    why: Optional[WhySection] = Field(default=None, description="Why explanation section")
+    why_not: List[WhyNotItem] = Field(default_factory=list, description="Structured why-not explanation list")
+    conflicts: List[ConflictExplanation] = Field(default_factory=list, description="Structured conflict details")
+    inputs: Optional[Dict[str, Dict[str, float]]] = Field(default=None, description="Categorized input metrics")
+    model_provenance: Optional[Dict[str, str]] = Field(default=None, description="Model versions used")
+    previous_decision: Optional[Dict[str, Any]] = Field(default=None, description="Previous decision card summary if available")
+    what_changed: List[WhatChangedItem] = Field(default_factory=list, description="Deterministic change list compared to previous decision")
 
 class OverrideParams(BaseModel):
     wind_speed_kmh: Optional[float] = Field(default=None, ge=0.0, description="Override wind speed in km/h")

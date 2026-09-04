@@ -22,7 +22,11 @@ from backend.schemas.contracts import (
     DecisionCard,
     ExplainabilityDetails,
     RuleTrace,
-    RejectedAction
+    RejectedAction,
+    DecisionSummary,
+    WhySection,
+    WhyNotItem,
+    ConflictExplanation
 )
 
 def arbitrate_daily_plan(
@@ -281,8 +285,11 @@ def arbitrate_daily_plan(
 
     model_provenance = {
         **getattr(soil_state, "model_version", {}),
-        **getattr(pest_state, "model_version", {})
+        **getattr(pest_state, "model_version", {}),
+        "arbitration_engine": "Arbitration-Engine-v2.0"
     }
+
+    confidence_text = f"Data Freshness: {weather_forecast.source.replace('_', ' ').title()}"
 
     decision_card = DecisionCard(
         decision_id=decision_uuid,
@@ -291,46 +298,119 @@ def arbitrate_daily_plan(
         primary_action=primary_action_str,
         critical_prohibition=critical_prohibition_str,
         scientific_rationale=scientific_rationale_str,
-        confidence_indicator=f"Data Freshness: {weather_forecast.source.replace('_', ' ').title()}",
+        confidence_indicator=confidence_text,
         explainability_id=explainability_uuid,
         created_at=datetime.now(timezone.utc).isoformat(),
         model_version=model_provenance
     )
 
+    soil_metrics_dict = {
+        "depletion_mm": soil_state.depletion_mm,
+        "raw_mm": soil_state.raw_mm,
+        "taw_mm": soil_state.taw_mm,
+        "is_moisture_stressed": 1.0 if is_moisture_stressed else 0.0
+    }
+    spray_window_metrics_dict = {
+        "wind_speed_kmh": weather_forecast.wind_speed_kmh,
+        "wind_safe_limit_kmh": settings.WIND_SAFE_LIMIT_KMH,
+        "rain_next_12h_mm": weather_forecast.rain_next_12h_mm,
+        "rain_next_36h_mm": weather_forecast.rain_next_36h_mm,
+        "rain_prob_next_6h": weather_forecast.rain_prob_next_6h,
+        "rain_irrigation_suppress_threshold_mm": settings.RAIN_IRRIGATION_SUPPRESS_MM_36H,
+        "rain_prob_spray_block_threshold": settings.RAIN_PROB_SPRAY_BLOCK_PCT_6H
+    }
+    pest_metrics_dict = {
+        "accumulated_gdd": pest_state.accumulated_gdd,
+        "gdd_threshold": pest_state.gdd_threshold,
+        "risk_triggered": 1.0 if pest_state.risk_triggered else 0.0
+    }
+    market_metrics_dict = {
+        "modal_price_inr": market_state.modal_price_inr,
+        "sma_7_inr": market_state.sma_7_inr,
+        "price_momentum_percent": market_state.price_momentum_percent
+    }
+
+    # Build Phase 3 presentation-ready facts
+    summary = DecisionSummary(
+        primary_action=primary_action_str,
+        critical_prohibition=critical_prohibition_str,
+        plain_language_reason=scientific_rationale_str,
+        decision_status=confidence_text
+    )
+
+    triggered_traces = [t for t in rule_traces if t.triggered]
+    why = WhySection(
+        selected_rules=[t.rule_id for t in triggered_traces],
+        triggered_conditions=[t.condition_evaluated for t in triggered_traces],
+        priority_reason="Rules evaluated strictly in priority order from highest safety constraint (100) down to routine operations (10)."
+    )
+
+    why_not_list = [
+        WhyNotItem(
+            action=ra.candidate_action,
+            reason=ra.reason,
+            blocking_rule=ra.blocked_by_rule_id,
+            priority=next((t.priority for t in rule_traces if t.rule_id == ra.blocked_by_rule_id), 100)
+        )
+        for ra in rejected_actions
+    ]
+
+    conflicts_explained: List[ConflictExplanation] = []
+    for c_id in conflicts_detected:
+        if c_id == "PEST_WIND_DRIFT_CONFLICT":
+            conflicts_explained.append(ConflictExplanation(
+                conflict_id="PEST_WIND_DRIFT_CONFLICT",
+                description="Pest treatment indicated but wind speed exceeds safe limit.",
+                winning_rule="RULE_PEST_WIND_01",
+                winning_priority=100,
+                rejected_action="CHEMICAL_PESTICIDE_SPRAY",
+                resolution="Block chemical spraying and deploy biological pheromone traps."
+            ))
+        elif c_id == "PEST_RAIN_WASHOFF_CONFLICT":
+            conflicts_explained.append(ConflictExplanation(
+                conflict_id="PEST_RAIN_WASHOFF_CONFLICT",
+                description="Pest treatment indicated but imminent rainfall will cause spray wash-off.",
+                winning_rule="RULE_PEST_RAIN_01",
+                winning_priority=90,
+                rejected_action="FOLIAR_CHEMICAL_SPRAY",
+                resolution="Block foliar spray until rain clears."
+            ))
+        elif c_id == "HYDROLOGICAL_RAIN_CONFLICT":
+            conflicts_explained.append(ConflictExplanation(
+                conflict_id="HYDROLOGICAL_RAIN_CONFLICT",
+                description="Soil water depletion triggers irrigation need, but heavy rain forecast within 36 hours.",
+                winning_rule="RULE_HYDRO_01",
+                winning_priority=80,
+                rejected_action="TUBEVILL_IRRIGATION",
+                resolution="Suppress irrigation and clear field drainage trenches."
+            ))
+
+    inputs = {
+        "soil": soil_metrics_dict,
+        "weather": spray_window_metrics_dict,
+        "pest": pest_metrics_dict,
+        "market": market_metrics_dict
+    }
+
     explainability_details = ExplainabilityDetails(
         decision_id=decision_uuid,
         plot_id=plot_id,
         date=date_str,
-        soil_metrics={
-            "depletion_mm": soil_state.depletion_mm,
-            "raw_mm": soil_state.raw_mm,
-            "taw_mm": soil_state.taw_mm,
-            "is_moisture_stressed": 1.0 if is_moisture_stressed else 0.0
-        },
-        spray_window_metrics={
-            "wind_speed_kmh": weather_forecast.wind_speed_kmh,
-            "wind_safe_limit_kmh": settings.WIND_SAFE_LIMIT_KMH,
-            "rain_next_12h_mm": weather_forecast.rain_next_12h_mm,
-            "rain_next_36h_mm": weather_forecast.rain_next_36h_mm,
-            "rain_prob_next_6h": weather_forecast.rain_prob_next_6h,
-            "rain_irrigation_suppress_threshold_mm": settings.RAIN_IRRIGATION_SUPPRESS_MM_36H,
-            "rain_prob_spray_block_threshold": settings.RAIN_PROB_SPRAY_BLOCK_PCT_6H
-        },
-        pest_metrics={
-            "accumulated_gdd": pest_state.accumulated_gdd,
-            "gdd_threshold": pest_state.gdd_threshold,
-            "risk_triggered": 1.0 if pest_state.risk_triggered else 0.0
-        },
-        market_metrics={
-            "modal_price_inr": market_state.modal_price_inr,
-            "sma_7_inr": market_state.sma_7_inr,
-            "price_momentum_percent": market_state.price_momentum_percent
-        },
+        soil_metrics=soil_metrics_dict,
+        spray_window_metrics=spray_window_metrics_dict,
+        pest_metrics=pest_metrics_dict,
+        market_metrics=market_metrics_dict,
         confidence_indicator=weather_forecast.source,
         rule_traces=rule_traces,
         conflicts_detected=conflicts_detected,
         rejected_actions=rejected_actions,
-        model_version=model_provenance
+        model_version=model_provenance,
+        summary=summary,
+        why=why,
+        why_not=why_not_list,
+        conflicts=conflicts_explained,
+        inputs=inputs,
+        model_provenance=model_provenance
     )
 
     return decision_card, explainability_details

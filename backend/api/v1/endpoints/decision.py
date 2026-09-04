@@ -5,8 +5,9 @@ Decision API Endpoints:
 """
 
 import json
+from typing import List
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
@@ -18,7 +19,9 @@ from backend.schemas.contracts import (
     SimulationResponse,
     SoilState,
     PestState,
-    WeatherForecast
+    WeatherForecast,
+    DecisionHistoryItem,
+    RuleTrace
 )
 from backend.engines.arbitration import arbitrate_daily_plan
 from backend.engines.pest import calculate_pest_phenology, calculate_gdd
@@ -254,3 +257,53 @@ def simulate_decision(req: SimulationRequest, db: Session = Depends(get_db)):
         is_flipped=is_flipped,
         flip_reason=flip_reason
     )
+
+
+@router.get("/history/{plot_id}", response_model=List[DecisionHistoryItem])
+def get_decision_history(
+    plot_id: str,
+    limit: int = Query(default=20, ge=1, le=100, description="Max history items to return (1-100)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieves historical decisions for a plot, ordered newest first (created_at DESC).
+    Consumes ONLY persisted DBDecisionRecord data.
+    """
+    records = db.query(DBDecisionRecord).filter(
+        DBDecisionRecord.plot_id == plot_id
+    ).order_by(DBDecisionRecord.created_at.desc()).limit(limit).all()
+
+    history_items: List[DecisionHistoryItem] = []
+    for rec in records:
+        rule_traces = []
+        model_ver = None
+        if rec.explainability_json:
+            try:
+                exp_data = json.loads(rec.explainability_json)
+                rule_traces_data = exp_data.get("rule_traces", [])
+                rule_traces = [RuleTrace(**t) for t in rule_traces_data]
+                model_ver = exp_data.get("model_version", None)
+            except Exception:
+                pass
+
+        created_str = (
+            rec.created_at.isoformat()
+            if isinstance(rec.created_at, datetime)
+            else str(rec.created_at)
+        )
+
+        history_items.append(DecisionHistoryItem(
+            decision_id=rec.decision_id,
+            plot_id=rec.plot_id,
+            date=rec.date,
+            primary_action=rec.primary_action,
+            critical_prohibition=rec.critical_prohibition,
+            scientific_rationale=rec.scientific_rationale,
+            confidence_indicator=rec.confidence_indicator,
+            explainability_id=rec.explainability_id,
+            created_at=created_str,
+            rule_traces=rule_traces,
+            model_version=model_ver
+        ))
+
+    return history_items
