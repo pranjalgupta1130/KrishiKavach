@@ -1,89 +1,36 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { FieldProvider } from './contexts/FieldContext';
 import { AppLayout } from './layouts/AppLayout';
-import { PlotProfileCard } from './components/PlotProfileCard';
-import { OnboardingForm } from './components/OnboardingForm';
-import { DailyDecisionCard } from './components/DailyDecisionCard';
-import { WhatIfControls } from './components/WhatIfControls';
-import { TrendChartsSection } from './components/TrendChartsSection';
-import { usePlotProfile } from './hooks/usePlot';
-import { useDailyDecision } from './hooks/useDecision';
-import { PlotProfile } from './types/api';
-import { useLanguage } from './contexts/LanguageContext';
-import { CheckCircle2, Sparkles } from 'lucide-react';
-
-const STORAGE_PLOT_KEY = 'krishikavach_active_plot_id';
+import { DashboardPage } from './pages/DashboardPage';
+import { FieldsPage } from './pages/FieldsPage';
+import { WeatherPage } from './pages/WeatherPage';
+import { CropHealthPage } from './pages/CropHealthPage';
+import { MarketPage } from './pages/MarketPage';
+import { HistoryPage } from './pages/HistoryPage';
+import { ScanCropPage } from './pages/ScanCropPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 export const App: React.FC = () => {
-  const { t } = useLanguage();
-  
-  // Default active plot ID (uses localStorage or Tukaram benchmark plot)
-  const [activePlotId, setActivePlotId] = useState<string>(() => {
-    try {
-      return localStorage.getItem(STORAGE_PLOT_KEY) || 'tukaram_beed_01';
-    } catch {
-      return 'tukaram_beed_01';
-    }
-  });
-
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
-  const [successBanner, setSuccessBanner] = useState<string | null>(null);
-
-  // Fetch real plot profile from backend
-  const { data: plot, isLoading, isError } = usePlotProfile(activePlotId);
-  const { data: decision } = useDailyDecision(activePlotId);
-
-  const handlePlotCreated = (savedPlot: PlotProfile) => {
-    try {
-      localStorage.setItem(STORAGE_PLOT_KEY, savedPlot.plot_id);
-    } catch {
-      // Ignore
-    }
-    setActivePlotId(savedPlot.plot_id);
-    setShowOnboarding(false);
-    setSuccessBanner(t.farmSavedSuccess);
-    setTimeout(() => setSuccessBanner(null), 5000);
-  };
-
   return (
-    <AppLayout>
-      {/* Success Notification Banner */}
-      {successBanner && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 flex items-center justify-between gap-2 text-xs sm:text-sm font-bold text-emerald-900 shadow-xs animate-fade-in">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
-            <span>{successBanner}</span>
-          </div>
-          <Sparkles className="w-4 h-4 text-emerald-600" />
-        </div>
-      )}
-
-      {/* Main Content Area */}
-      {showOnboarding ? (
-        <OnboardingForm
-          onSuccess={handlePlotCreated}
-          onCancel={plot ? () => setShowOnboarding(false) : undefined}
-        />
-      ) : (
-        <>
-          {/* 1. Farmer/Field Summary Card */}
-          <PlotProfileCard
-            plot={plot}
-            isLoading={isLoading}
-            isError={isError}
-            onEditClick={() => setShowOnboarding(true)}
-          />
-
-          {/* 2. Real Daily Decision Card with Integrated Voice Player & Explainability Drawer */}
-          <DailyDecisionCard plotId={activePlotId} />
-
-          {/* 3. Real Interactive What-If Simulation Controls */}
-          <WhatIfControls plotId={activePlotId} />
-
-          {/* 4. Real Recharts Trend Visualizations Section */}
-          <TrendChartsSection decisionId={decision?.explainability_id || decision?.decision_id || null} />
-        </>
-      )}
-    </AppLayout>
+    <BrowserRouter>
+      <FieldProvider>
+        <AppLayout>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/fields" element={<FieldsPage />} />
+            <Route path="/weather" element={<WeatherPage />} />
+            <Route path="/crop-health" element={<CropHealthPage />} />
+            <Route path="/market" element={<MarketPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/scan" element={<ScanCropPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </AppLayout>
+      </FieldProvider>
+    </BrowserRouter>
   );
 };
 

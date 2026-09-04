@@ -84,3 +84,8 @@ export async function simulateDecision(req: SimulationRequest): Promise<Simulati
 export async function getExplainability(decisionId: string): Promise<ExplainabilityDetails> {
   return request<ExplainabilityDetails>(`/api/v1/explainability/${encodeURIComponent(decisionId)}`);
 }
+
+// 7. Fetch Plot Decision History
+export async function getDecisionHistory(plotId: string): Promise<import('../types/api').DecisionHistoryItem[]> {
+  return request<import('../types/api').DecisionHistoryItem[]>(`/api/v1/decision/history/${encodeURIComponent(plotId)}`);
+}

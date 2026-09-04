@@ -16,6 +16,19 @@ export interface ShellTranslations {
   advicePlaceholder: string;
   whatIfDesc: string;
   whyDesc: string;
+  // Multi-Page Navigation Links
+  navDashboard: string;
+  navFields: string;
+  navWeather: string;
+  navCropHealth: string;
+  navMarket: string;
+  navHistory: string;
+  navScan: string;
+  navSettings: string;
+  activeFieldLabel: string;
+  selectFieldPrompt: string;
+  quickActionsTitle: string;
+  
   location: string;
   district: string;
   crop: string;

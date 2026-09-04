@@ -74,3 +74,26 @@ export interface SimulationResponse {
   is_flipped: boolean;
   flip_reason: string;
 }
+
+export interface DecisionHistoryItem {
+  decision_id: string;
+  plot_id: string;
+  date: string;
+  primary_action: string;
+  critical_prohibition: string;
+  scientific_rationale: string;
+  confidence_indicator: string;
+  explainability_id: string;
+  created_at: string;
+  rule_traces?: RuleTrace[];
+  model_version?: Record<string, string>;
+}
+
+export interface CropScanResult {
+  observations: string[];
+  possible_issue: string;
+  confidence: number;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  needs_field_scouting: boolean;
+  recommendation_note: string;
+}
