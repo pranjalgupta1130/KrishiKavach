@@ -25,6 +25,28 @@ except ImportError:
         )
 
 
+def validate_temperature(temp_c: Union[int, float]) -> float:
+    """Validates that a temperature value in Celsius falls within plausible environmental limits (-20°C to 60°C).
+
+    Args:
+        temp_c: Temperature reading in degrees Celsius (°C).
+
+    Returns:
+        float: Validated temperature as a float.
+
+    Raises:
+        TypeError: If temp_c is not numeric (or is a boolean).
+        ValueError: If temp_c is below -20°C or above 60°C.
+    """
+    if not isinstance(temp_c, (int, float)) or isinstance(temp_c, bool):
+        raise TypeError(f"Temperature value must be numeric (int or float). Received {type(temp_c).__name__}.")
+
+    if temp_c < -20.0 or temp_c > 60.0:
+        raise ValueError(f"Temperature {temp_c}°C is outside the valid range of [-20°C, 60°C].")
+
+    return float(temp_c)
+
+
 def calculate_pink_bollworm_risk(
     tmax: Union[int, float],
     tmin: Union[int, float],
@@ -50,17 +72,19 @@ def calculate_pink_bollworm_risk(
 
     Raises:
         TypeError: If any input is not an int or float (or is a boolean).
-        ValueError: If tmax < tmin or previous_gdd < 0.
+        ValueError: If tmax < tmin, temperatures are outside [-20°C, 60°C], or previous_gdd < 0.
     """
     # ---------------------------------------------------------
-    # 1. Input Validation
+    # 1. Input and Threshold Validation
     # ---------------------------------------------------------
-    for param_name, val in [("tmax", tmax), ("tmin", tmin), ("previous_gdd", previous_gdd)]:
-        if not isinstance(val, (int, float)) or isinstance(val, bool):
-            raise TypeError(f"Parameter '{param_name}' must be a numeric value (int or float). Received {type(val).__name__}.")
+    tmax_val = validate_temperature(tmax)
+    tmin_val = validate_temperature(tmin)
 
-    if tmax < tmin:
-        raise ValueError(f"Maximum temperature (tmax={tmax}) cannot be lower than minimum temperature (tmin={tmin}).")
+    if not isinstance(previous_gdd, (int, float)) or isinstance(previous_gdd, bool):
+        raise TypeError(f"Parameter 'previous_gdd' must be a numeric value (int or float). Received {type(previous_gdd).__name__}.")
+
+    if tmax_val < tmin_val:
+        raise ValueError(f"Maximum temperature (tmax={tmax_val}) cannot be lower than minimum temperature (tmin={tmin_val}).")
 
     if previous_gdd < 0:
         raise ValueError(f"previous_gdd cannot be negative. Received {previous_gdd}.")
@@ -69,7 +93,7 @@ def calculate_pink_bollworm_risk(
     # 2. GDD Calculation
     # ---------------------------------------------------------
     # Formula: daily_gdd = max(((tmax + tmin) / 2) - PINK_BOLLWORM_TBASE, 0)
-    mean_temp = (float(tmax) + float(tmin)) / 2.0
+    mean_temp = (tmax_val + tmin_val) / 2.0
     daily_gdd = max(mean_temp - PINK_BOLLWORM_TBASE, 0.0)
     cumulative_gdd = float(previous_gdd) + daily_gdd
 
@@ -120,7 +144,7 @@ def calculate_cumulative_gdd(
 
     Raises:
         TypeError: If daily_temperatures is not a list, or if entries are not dicts with numeric tmax/tmin.
-        ValueError: If 'tmax' or 'tmin' keys are missing, or if tmax < tmin for any day record.
+        ValueError: If 'tmax' or 'tmin' keys are missing, tmax < tmin, or temperatures are outside [-20°C, 60°C].
     """
     if not isinstance(daily_temperatures, list):
         raise TypeError(f"Parameter 'daily_temperatures' must be a list of dictionaries. Received {type(daily_temperatures).__name__}.")
@@ -138,16 +162,14 @@ def calculate_cumulative_gdd(
         tmax = day_record["tmax"]
         tmin = day_record["tmin"]
 
-        if not isinstance(tmax, (int, float)) or isinstance(tmax, bool):
-            raise TypeError(f"'tmax' at index {idx} must be numeric (int or float). Received {type(tmax).__name__}.")
-        if not isinstance(tmin, (int, float)) or isinstance(tmin, bool):
-            raise TypeError(f"'tmin' at index {idx} must be numeric (int or float). Received {type(tmin).__name__}.")
+        tmax_val = validate_temperature(tmax)
+        tmin_val = validate_temperature(tmin)
 
-        if tmax < tmin:
-            raise ValueError(f"Record at index {idx} has tmax ({tmax}) lower than tmin ({tmin}).")
+        if tmax_val < tmin_val:
+            raise ValueError(f"Record at index {idx} has tmax ({tmax_val}) lower than tmin ({tmin_val}).")
 
         # Calculate daily GDD, ignoring negative values
-        mean_temp = (float(tmax) + float(tmin)) / 2.0
+        mean_temp = (tmax_val + tmin_val) / 2.0
         gdd = max(mean_temp - PINK_BOLLWORM_TBASE, 0.0)
         daily_gdd_list.append(round(gdd, 2))
         total_gdd += gdd

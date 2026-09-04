@@ -14,6 +14,7 @@ from backend.engines.soil_engine import (
     calculate_soil_moisture_status,
     calculate_root_depth,
     get_crop_stage_parameters,
+    validate_soil_moisture,
 )
 
 
@@ -105,3 +106,27 @@ def test_crop_stage_parameters_invalid_stage():
     """Test 13: Invalid stage parameter lookup raises ValueError."""
     with pytest.raises(ValueError, match=r"Invalid crop stage .* Valid stages are:"):
         get_crop_stage_parameters("dormant")
+
+
+def test_validate_soil_moisture_valid_low():
+    """Test 14: Valid low soil moisture boundary (0.0)."""
+    assert validate_soil_moisture(0.0) == 0.0
+    assert validate_soil_moisture(0.05) == 0.05
+
+
+def test_validate_soil_moisture_valid_high():
+    """Test 15: Valid high soil moisture boundary (1.0)."""
+    assert validate_soil_moisture(1.0) == 1.0
+    assert validate_soil_moisture(0.95) == 0.95
+
+
+def test_validate_soil_moisture_below_minimum():
+    """Test 16: Soil moisture below minimum (0.0) raises ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        validate_soil_moisture(-0.05)
+
+
+def test_validate_soil_moisture_above_maximum():
+    """Test 17: Soil moisture above maximum (1.0) raises ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[0.0, 1.0\]"):
+        validate_soil_moisture(1.05)

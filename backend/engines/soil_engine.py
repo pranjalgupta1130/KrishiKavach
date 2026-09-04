@@ -36,6 +36,28 @@ ROOT_DEPTH_BY_STAGE: Dict[str, float] = {
 }
 
 
+def validate_soil_moisture(value: Union[int, float]) -> float:
+    """Validates that a volumetric soil moisture value falls within the standard ratio range of 0.0 to 1.0 (0% to 100%).
+
+    Args:
+        value: Volumetric soil water content ratio (m³/m³ or fraction).
+
+    Returns:
+        float: Validated soil moisture value as a float.
+
+    Raises:
+        TypeError: If value is not numeric (or is a boolean).
+        ValueError: If value is less than 0.0 or greater than 1.0.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError(f"Soil moisture value must be numeric (int or float). Received {type(value).__name__}.")
+
+    if value < 0.0 or value > 1.0:
+        raise ValueError(f"Soil moisture {value} is outside the valid range of [0.0, 1.0].")
+
+    return float(value)
+
+
 def calculate_soil_moisture_status(soil_moisture: Union[int, float]) -> Dict[str, Any]:
     """Evaluates the status of soil moisture relative to field capacity and wilting point.
 
@@ -51,25 +73,21 @@ def calculate_soil_moisture_status(soil_moisture: Union[int, float]) -> Dict[str
 
     Raises:
         TypeError: If soil_moisture is not a numeric type (int or float) or is a boolean.
-        ValueError: If soil_moisture is negative.
+        ValueError: If soil_moisture is outside the valid range [0.0, 1.0].
     """
-    # Input validation
-    if not isinstance(soil_moisture, (int, float)) or isinstance(soil_moisture, bool):
-        raise TypeError(f"Parameter 'soil_moisture' must be a numeric value (int or float). Received {type(soil_moisture).__name__}.")
-
-    if soil_moisture < 0.0:
-        raise ValueError(f"soil_moisture cannot be negative. Received {soil_moisture}.")
+    # Validate soil moisture input
+    moisture_val = validate_soil_moisture(soil_moisture)
 
     # Status classification
-    if soil_moisture >= FIELD_CAPACITY:
+    if moisture_val >= FIELD_CAPACITY:
         status = "Optimal"
-    elif WILTING_POINT <= soil_moisture < FIELD_CAPACITY:
+    elif WILTING_POINT <= moisture_val < FIELD_CAPACITY:
         status = "Moderate"
     else:
         status = "Critical"
 
     return {
-        "soil_moisture": soil_moisture,
+        "soil_moisture": moisture_val,
         "field_capacity": FIELD_CAPACITY,
         "wilting_point": WILTING_POINT,
         "status": status,

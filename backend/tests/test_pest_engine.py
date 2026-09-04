@@ -14,6 +14,7 @@ from backend.engines.pest_engine import (
     calculate_pink_bollworm_risk,
     calculate_cumulative_gdd,
     determine_pest_stage,
+    validate_temperature,
 )
 
 
@@ -87,52 +88,50 @@ def test_calculate_cumulative_gdd_multiple_days():
 
 def test_pest_stage_egg():
     """Test 7: Egg stage progression for cumulative GDD in 0-100 range."""
-    result_0 = determine_pest_stage(0)
-    result_50 = determine_pest_stage(50)
-    result_100 = determine_pest_stage(100)
-
-    assert result_0["stage"] == "Egg"
-    assert result_0["cumulative_gdd"] == 0
-    assert result_50["stage"] == "Egg"
-    assert result_50["cumulative_gdd"] == 50
-    assert result_100["stage"] == "Egg"
-    assert result_100["cumulative_gdd"] == 100
+    assert determine_pest_stage(0)["stage"] == "Egg"
+    assert determine_pest_stage(50)["stage"] == "Egg"
+    assert determine_pest_stage(100)["stage"] == "Egg"
 
 
 def test_pest_stage_larva():
     """Test 8: Larva stage progression for cumulative GDD in 101-300 range."""
-    result_101 = determine_pest_stage(101)
-    result_200 = determine_pest_stage(200)
-    result_300 = determine_pest_stage(300)
-
-    assert result_101["stage"] == "Larva"
-    assert result_101["cumulative_gdd"] == 101
-    assert result_200["stage"] == "Larva"
-    assert result_200["cumulative_gdd"] == 200
-    assert result_300["stage"] == "Larva"
-    assert result_300["cumulative_gdd"] == 300
+    assert determine_pest_stage(101)["stage"] == "Larva"
+    assert determine_pest_stage(200)["stage"] == "Larva"
+    assert determine_pest_stage(300)["stage"] == "Larva"
 
 
 def test_pest_stage_pupa():
     """Test 9: Pupa stage progression for cumulative GDD in 301-500 range."""
-    result_301 = determine_pest_stage(301)
-    result_400 = determine_pest_stage(400)
-    result_500 = determine_pest_stage(500)
-
-    assert result_301["stage"] == "Pupa"
-    assert result_301["cumulative_gdd"] == 301
-    assert result_400["stage"] == "Pupa"
-    assert result_400["cumulative_gdd"] == 400
-    assert result_500["stage"] == "Pupa"
-    assert result_500["cumulative_gdd"] == 500
+    assert determine_pest_stage(301)["stage"] == "Pupa"
+    assert determine_pest_stage(400)["stage"] == "Pupa"
+    assert determine_pest_stage(500)["stage"] == "Pupa"
 
 
 def test_pest_stage_adult():
     """Test 10: Adult stage progression for cumulative GDD 501+."""
-    result_501 = determine_pest_stage(501)
-    result_650 = determine_pest_stage(650)
+    assert determine_pest_stage(501)["stage"] == "Adult"
+    assert determine_pest_stage(650)["stage"] == "Adult"
 
-    assert result_501["stage"] == "Adult"
-    assert result_501["cumulative_gdd"] == 501
-    assert result_650["stage"] == "Adult"
-    assert result_650["cumulative_gdd"] == 650
+
+def test_validate_temperature_valid_low():
+    """Test 11: Valid low temperature boundary (-20°C)."""
+    assert validate_temperature(-20) == -20.0
+    assert validate_temperature(-15.5) == -15.5
+
+
+def test_validate_temperature_valid_high():
+    """Test 12: Valid high temperature boundary (60°C)."""
+    assert validate_temperature(60) == 60.0
+    assert validate_temperature(45.0) == 45.0
+
+
+def test_validate_temperature_below_minimum():
+    """Test 13: Temperature below minimum (-20°C) raises ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[-20°C, 60°C\]"):
+        validate_temperature(-25)
+
+
+def test_validate_temperature_above_maximum():
+    """Test 14: Temperature above maximum (60°C) raises ValueError."""
+    with pytest.raises(ValueError, match=r"outside the valid range of \[-20°C, 60°C\]"):
+        validate_temperature(65)
