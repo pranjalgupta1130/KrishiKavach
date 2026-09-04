@@ -158,6 +158,48 @@ def calculate_cumulative_gdd(
     }
 
 
+def determine_pest_stage(cumulative_gdd: Union[int, float]) -> Dict[str, Any]:
+    """Determines the biological developmental stage of the pest based on cumulative GDD.
+
+    Stage progression thresholds:
+        - 0 to 100 GDD: Egg
+        - 101 to 300 GDD: Larva
+        - 301 to 500 GDD: Pupa
+        - 501+ GDD: Adult
+
+    Args:
+        cumulative_gdd: Total accumulated Growing Degree Days (int or float).
+
+    Returns:
+        Dict[str, Any]: Dictionary containing:
+            - 'cumulative_gdd' (int/float): The input cumulative GDD value.
+            - 'stage' (str): The pest developmental stage ('Egg', 'Larva', 'Pupa', or 'Adult').
+
+    Raises:
+        TypeError: If cumulative_gdd is not numeric (or is a boolean).
+        ValueError: If cumulative_gdd is negative.
+    """
+    if not isinstance(cumulative_gdd, (int, float)) or isinstance(cumulative_gdd, bool):
+        raise TypeError(f"Parameter 'cumulative_gdd' must be a numeric value (int or float). Received {type(cumulative_gdd).__name__}.")
+
+    if cumulative_gdd < 0:
+        raise ValueError(f"cumulative_gdd cannot be negative. Received {cumulative_gdd}.")
+
+    if cumulative_gdd <= 100:
+        stage = "Egg"
+    elif cumulative_gdd <= 300:
+        stage = "Larva"
+    elif cumulative_gdd <= 500:
+        stage = "Pupa"
+    else:
+        stage = "Adult"
+
+    return {
+        "cumulative_gdd": cumulative_gdd,
+        "stage": stage,
+    }
+
+
 if __name__ == "__main__":
     result = calculate_pink_bollworm_risk(35, 25, 400)
     print("Test Result:")
@@ -171,3 +213,7 @@ if __name__ == "__main__":
     cumulative_result = calculate_cumulative_gdd(historical_sample)
     print("\nHistorical Cumulative GDD Result:")
     print(cumulative_result)
+
+    print("\nPest Stage Determinations:")
+    for gdd_val in [50, 200, 400, 600]:
+        print(determine_pest_stage(gdd_val))

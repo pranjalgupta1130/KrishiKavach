@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 from backend.engines.pest_engine import (
     calculate_pink_bollworm_risk,
     calculate_cumulative_gdd,
+    determine_pest_stage,
 )
 
 
@@ -82,3 +83,56 @@ def test_calculate_cumulative_gdd_multiple_days():
 
     assert result["daily_gdd"] == [13.0, 0.0, 10.0, 17.0, 0.0]
     assert result["cumulative_gdd"] == 40.0
+
+
+def test_pest_stage_egg():
+    """Test 7: Egg stage progression for cumulative GDD in 0-100 range."""
+    result_0 = determine_pest_stage(0)
+    result_50 = determine_pest_stage(50)
+    result_100 = determine_pest_stage(100)
+
+    assert result_0["stage"] == "Egg"
+    assert result_0["cumulative_gdd"] == 0
+    assert result_50["stage"] == "Egg"
+    assert result_50["cumulative_gdd"] == 50
+    assert result_100["stage"] == "Egg"
+    assert result_100["cumulative_gdd"] == 100
+
+
+def test_pest_stage_larva():
+    """Test 8: Larva stage progression for cumulative GDD in 101-300 range."""
+    result_101 = determine_pest_stage(101)
+    result_200 = determine_pest_stage(200)
+    result_300 = determine_pest_stage(300)
+
+    assert result_101["stage"] == "Larva"
+    assert result_101["cumulative_gdd"] == 101
+    assert result_200["stage"] == "Larva"
+    assert result_200["cumulative_gdd"] == 200
+    assert result_300["stage"] == "Larva"
+    assert result_300["cumulative_gdd"] == 300
+
+
+def test_pest_stage_pupa():
+    """Test 9: Pupa stage progression for cumulative GDD in 301-500 range."""
+    result_301 = determine_pest_stage(301)
+    result_400 = determine_pest_stage(400)
+    result_500 = determine_pest_stage(500)
+
+    assert result_301["stage"] == "Pupa"
+    assert result_301["cumulative_gdd"] == 301
+    assert result_400["stage"] == "Pupa"
+    assert result_400["cumulative_gdd"] == 400
+    assert result_500["stage"] == "Pupa"
+    assert result_500["cumulative_gdd"] == 500
+
+
+def test_pest_stage_adult():
+    """Test 10: Adult stage progression for cumulative GDD 501+."""
+    result_501 = determine_pest_stage(501)
+    result_650 = determine_pest_stage(650)
+
+    assert result_501["stage"] == "Adult"
+    assert result_501["cumulative_gdd"] == 501
+    assert result_650["stage"] == "Adult"
+    assert result_650["cumulative_gdd"] == 650
