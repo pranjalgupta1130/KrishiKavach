@@ -67,8 +67,7 @@ def compute_agronomic_states(db_plot: DBPlot, weather_forecast: WeatherForecast)
     kc = crop_cfg.get("kc_flowering", 1.15)
     etc = kc * weather_forecast.et0_mm
 
-    raw_est = 1000.0 * (settings.VERTISOL_FC - settings.VERTISOL_WP) * 0.6 * crop_cfg.get("p_raw_fraction", 0.65)
-    base_depletion = min(etc * days_elapsed, raw_est * 1.05) if days_elapsed > 0 else 0.0
+    base_depletion = etc * days_elapsed if days_elapsed > 0 else 0.0
 
     soil_state = calculate_soil_water_balance(
         crop_type=db_plot.crop_type,

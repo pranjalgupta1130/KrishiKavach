@@ -19,11 +19,13 @@ def get_explainability_details(decision_id: str, db: Session = Depends(get_db)):
     Retrieves rule traces, threshold evaluations, and exact input metrics
     used during deterministic arbitration for a specific decision_id.
     """
-    record = db.query(DBDecisionRecord).filter(DBDecisionRecord.decision_id == decision_id).first()
+    record = db.query(DBDecisionRecord).filter(
+        (DBDecisionRecord.decision_id == decision_id) | (DBDecisionRecord.explainability_id == decision_id)
+    ).first()
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Explainability record for decision ID '{decision_id}' not found."
+            detail=f"Explainability record for decision ID / explainability ID '{decision_id}' not found."
         )
 
     try:

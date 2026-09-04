@@ -220,6 +220,11 @@ def arbitrate_daily_plan(
     decision_uuid = f"dec_{uuid.uuid4().hex[:12]}"
     explainability_uuid = f"exp_{uuid.uuid4().hex[:12]}"
 
+    model_provenance = {
+        **getattr(soil_state, "model_version", {}),
+        **getattr(pest_state, "model_version", {})
+    }
+
     decision_card = DecisionCard(
         decision_id=decision_uuid,
         plot_id=plot_id,
@@ -229,7 +234,8 @@ def arbitrate_daily_plan(
         scientific_rationale=scientific_rationale_str,
         confidence_indicator=f"Data Freshness: {weather_forecast.source.replace('_', ' ').title()}",
         explainability_id=explainability_uuid,
-        created_at=datetime.now(timezone.utc).isoformat()
+        created_at=datetime.now(timezone.utc).isoformat(),
+        model_version=model_provenance
     )
 
     explainability_details = ExplainabilityDetails(
@@ -262,7 +268,8 @@ def arbitrate_daily_plan(
             "price_momentum_percent": market_state.price_momentum_percent
         },
         confidence_indicator=weather_forecast.source,
-        rule_traces=rule_traces
+        rule_traces=rule_traces,
+        model_version=model_provenance
     )
 
     return decision_card, explainability_details

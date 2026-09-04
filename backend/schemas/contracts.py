@@ -23,6 +23,12 @@ class SoilState(BaseModel):
     taw_mm: float = Field(..., ge=0.0, description="Total Available Water capacity in mm")
     moisture_status: str = Field(..., description="MOISTURE_STRESS or MOISTURE_ADEQUATE")
     volumetric_water_content: float = Field(..., ge=0.0, le=1.0, description="Current volumetric soil moisture fraction")
+    model_version: Dict[str, str] = Field(default_factory=lambda: {"soil": "FAO-56-v1.0"}, description="Scientific model provenance")
+
+    @property
+    def depletion_exceeded(self) -> bool:
+        """Returns True if root-zone depletion has reached or exceeded Readily Available Water (RAW)."""
+        return self.depletion_mm >= self.raw_mm
 
 class PestState(BaseModel):
     crop_type: str = Field(..., description="Crop identifier")
@@ -31,6 +37,7 @@ class PestState(BaseModel):
     gdd_threshold: float = Field(..., ge=0.0, description="Emergence threshold degree days")
     risk_triggered: bool = Field(..., description="True if GDD >= threshold")
     growth_stage: str = Field(default="flowering_boll", description="Current crop growth stage")
+    model_version: Dict[str, str] = Field(default_factory=lambda: {"pest": "Thermal-GDD-v1.0"}, description="Scientific model provenance")
 
 class WeatherForecast(BaseModel):
     date: str = Field(..., description="Forecast date YYYY-MM-DD")
@@ -66,6 +73,7 @@ class DecisionCard(BaseModel):
     explainability_id: str = Field(..., description="ID to fetch deep explainability drawer details")
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     translations: Dict[str, Dict[str, str]] = Field(default_factory=dict, description="Vernacular translations (mr, hi)")
+    model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
 
 class RuleTrace(BaseModel):
     rule_id: str = Field(..., description="Identifier of the arbitration rule")
@@ -84,6 +92,7 @@ class ExplainabilityDetails(BaseModel):
     market_metrics: Dict[str, float] = Field(..., description="Modal price, SMA7, Momentum %")
     confidence_indicator: str = Field(..., description="Source of data")
     rule_traces: List[RuleTrace] = Field(..., description="Auditable trace of all arbitration rules evaluated")
+    model_version: Optional[Dict[str, str]] = Field(default=None, description="Scientific model provenance")
 
 class OverrideParams(BaseModel):
     wind_speed_kmh: Optional[float] = Field(default=None, ge=0.0, description="Override wind speed in km/h")
