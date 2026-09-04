@@ -21,3 +21,13 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Node Dependencies & Frontend Build Artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Frontend Environment & Secrets
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
